@@ -1,0 +1,37 @@
+{
+  "name": "nexo_ass",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "format": "turbo format",
+    "typecheck": "turbo typecheck"
+  },
+  "devDependencies": {
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "prettier": "^3.9.10",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "turbo": "^2.11.10",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "dependencies": {
+    "@ai-sdk/react": "^4.0.158",
+    "@mastra/ai-sdk": "^1.11.2",
+    "@mastra/core": "^1.79.0",
+    "@mastra/duckdb": "^1.15.0",
+    "@mastra/libsql": "^1.27.0",
+    "@mastra/loggers": "^1.3.9",
+    "@mastra/memory": "^1.39.0",
+    "@mastra/observability": "^1.21.0",
+    "ai": "^7.0.154",
+    "mastra": "^1.35.0",
+    "zod": "^4.6.7"
+  }
+}
