@@ -6,7 +6,9 @@
   },
   "include": [
     "src/lib/prisma.ts",
+    "prisma/seed.ts",
     "scripts/db-smoke.ts",
+    "scripts/check-seed.ts",
     "src/generated/prisma/**/*.ts"
   ]
 }

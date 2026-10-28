@@ -15,6 +15,8 @@
     "db:typecheck": "tsc --project tsconfig.db.json --noEmit",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "db:seed:check": "tsx scripts/check-seed.ts",
     "db:smoke": "tsx scripts/db-smoke.ts"
   },
   "devDependencies": {
