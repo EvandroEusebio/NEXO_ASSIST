@@ -1,0 +1,195 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  EMPLOYEE
+  ANALYST
+}
+
+enum ConversationStatus {
+  AGENT_ACTIVE
+  WAITING_ANALYST
+  ANALYST_ACTIVE
+  CLOSED
+}
+
+enum MessageAuthor {
+  EMPLOYEE
+  AGENT
+  ANALYST
+  SYSTEM
+}
+
+enum TicketType {
+  INC
+  REQ
+}
+
+enum TicketCategory {
+  ACCESS
+  NETWORK_VPN
+  HARDWARE
+  SOFTWARE
+  EMAIL
+  OTHER
+}
+
+enum TicketPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ANALYST
+  APPROVED
+  RESOLVED
+  CLOSED
+}
+
+enum DraftOperation {
+  CREATE
+  UPDATE
+  REOPEN
+}
+
+enum DraftStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+}
+
+model User {
+  id                    String         @id @default(uuid()) @db.Uuid
+  name                  String         @db.VarChar(160)
+  email                 String         @unique @db.VarChar(320)
+  role                  UserRole       @default(EMPLOYEE)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  conversations         Conversation[] @relation("EmployeeConversations")
+  assignedConversations Conversation[] @relation("AnalystConversations")
+  openedTickets         Ticket[]       @relation("OpenedTickets")
+  affectedTickets       Ticket[]       @relation("AffectedTickets")
+  authoredMessages      Message[]
+  ticketEvents          TicketEvent[]
+}
+
+model Conversation {
+  id                String             @id @default(uuid()) @db.Uuid
+  employeeId        String             @db.Uuid
+  assignedAnalystId String?            @db.Uuid
+  status            ConversationStatus @default(AGENT_ACTIVE)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  closedAt          DateTime?
+  employee          User               @relation("EmployeeConversations", fields: [employeeId], references: [id], onDelete: Restrict)
+  assignedAnalyst   User?              @relation("AnalystConversations", fields: [assignedAnalystId], references: [id], onDelete: SetNull)
+  messages          Message[]
+  drafts            TicketDraft[]
+
+  @@index([employeeId, createdAt])
+  @@index([status, updatedAt])
+  @@index([assignedAnalystId, status])
+}
+
+model Message {
+  id             String         @id @default(uuid()) @db.Uuid
+  conversationId String         @db.Uuid
+  author         MessageAuthor
+  authorUserId   String?        @db.Uuid
+  content        String         @db.Text
+  createdAt      DateTime       @default(now())
+  conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorUser     User?          @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+  decision       AgentDecision?
+
+  @@index([conversationId, createdAt])
+}
+
+model Ticket {
+  id                String         @id @default(uuid()) @db.Uuid
+  number            String         @unique @db.VarChar(32)
+  openedById        String         @db.Uuid
+  affectedUserId    String         @db.Uuid
+  type              TicketType
+  category          TicketCategory
+  priority          TicketPriority
+  status            TicketStatus   @default(OPEN)
+  title             String         @db.VarChar(240)
+  description       String         @db.Text
+  nextResponseDueAt DateTime?
+  lastResponseAt    DateTime?
+  resolvedAt        DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  openedBy          User           @relation("OpenedTickets", fields: [openedById], references: [id], onDelete: Restrict)
+  affectedUser      User           @relation("AffectedTickets", fields: [affectedUserId], references: [id], onDelete: Restrict)
+  drafts            TicketDraft[]
+  events            TicketEvent[]
+
+  @@index([openedById, status])
+  @@index([affectedUserId])
+  @@index([status, nextResponseDueAt])
+}
+
+model TicketDraft {
+  id             String         @id @default(uuid()) @db.Uuid
+  conversationId String         @db.Uuid
+  targetTicketId String?        @db.Uuid
+  operation      DraftOperation
+  status         DraftStatus    @default(PENDING)
+  payload        Json
+  version        Int            @default(1)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  confirmedAt    DateTime?
+  conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  targetTicket   Ticket?        @relation(fields: [targetTicketId], references: [id], onDelete: Restrict)
+
+  @@index([conversationId, status])
+}
+
+model HelpArticle {
+  id        String   @id @default(uuid()) @db.Uuid
+  title     String   @db.VarChar(240)
+  content   String   @db.Text
+  tags      String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AgentDecision {
+  id              String   @id @default(uuid()) @db.Uuid
+  messageId       String   @unique @db.Uuid
+  intent          String   @db.VarChar(80)
+  action          String   @db.VarChar(120)
+  confidence      Float?
+  evidenceSummary String?  @db.Text
+  reasonSummary   String   @db.Text
+  resultSummary   String?  @db.Text
+  createdAt       DateTime @default(now())
+  message         Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+model TicketEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @db.Uuid
+  actorId   String?  @db.Uuid
+  action    String   @db.VarChar(80)
+  metadata  Json?
+  createdAt DateTime @default(now())
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, createdAt])
+}
