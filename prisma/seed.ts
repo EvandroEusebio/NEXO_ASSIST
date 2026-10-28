@@ -8,7 +8,12 @@ import type {
   UserRole,
 } from "../src/generated/prisma/client"
 
-type SeedUser = { name: string; email: string; role: UserRole }
+type SeedUser = {
+  name: string
+  email: string
+  role: UserRole
+  demoLoginEnabled: boolean
+}
 type SeedArticle = {
   id: string
   title: string
@@ -36,17 +41,48 @@ const hoursFromNow = (hours: number) =>
   new Date(now.getTime() + hours * 60 * 60 * 1000)
 
 const users: SeedUser[] = [
-  { name: "Ana Souza", email: "ana.souza@nexo.com.br", role: "EMPLOYEE" },
+  {
+    name: "Ana Souza",
+    email: "ana.souza@nexo.com.br",
+    role: "EMPLOYEE",
+    demoLoginEnabled: true,
+  },
   {
     name: "Bruno Tavares",
     email: "bruno.tavares@nexo.com.br",
     role: "EMPLOYEE",
+    demoLoginEnabled: true,
   },
-  { name: "Carla Mendes", email: "carla.mendes@nexo.com.br", role: "EMPLOYEE" },
-  { name: "Diego Ramos", email: "diego.ramos@nexo.com.br", role: "EMPLOYEE" },
-  { name: "Elisa Prado", email: "elisa.prado@nexo.com.br", role: "EMPLOYEE" },
-  { name: "Rafael Lima", email: "rafael.lima@nexo.com.br", role: "ANALYST" },
-  { name: "Marta Alves", email: "marta.alves@nexo.com.br", role: "ANALYST" },
+  {
+    name: "Carla Mendes",
+    email: "carla.mendes@nexo.com.br",
+    role: "EMPLOYEE",
+    demoLoginEnabled: true,
+  },
+  {
+    name: "Diego Ramos",
+    email: "diego.ramos@nexo.com.br",
+    role: "EMPLOYEE",
+    demoLoginEnabled: true,
+  },
+  {
+    name: "Elisa Prado",
+    email: "elisa.prado@nexo.com.br",
+    role: "EMPLOYEE",
+    demoLoginEnabled: true,
+  },
+  {
+    name: "Rafael Lima",
+    email: "rafael.lima@nexo.com.br",
+    role: "ANALYST",
+    demoLoginEnabled: false,
+  },
+  {
+    name: "Marta Alves",
+    email: "marta.alves@nexo.com.br",
+    role: "ANALYST",
+    demoLoginEnabled: false,
+  },
 ]
 
 // IDs estáveis permitem repetir o seed sem exigir uma migração para acrescentar slug.
@@ -257,7 +293,11 @@ async function main() {
         const saved = await tx.user.upsert({
           where: { email: user.email },
           create: user,
-          update: { name: user.name, role: user.role },
+          update: {
+            name: user.name,
+            role: user.role,
+            demoLoginEnabled: user.demoLoginEnabled,
+          },
         })
         userIds.set(user.email, saved.id)
       }

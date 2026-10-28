@@ -5,6 +5,7 @@ O modelo usa PostgreSQL com Prisma ORM. O esquema está em `prisma/schema.prisma
 | Entidade        | Dados persistidos                                                            |
 | --------------- | ---------------------------------------------------------------------------- |
 | `User`          | Funcionário ou analista, identificado por e-mail único.                      |
+| `AuthSession`   | Hash do token, funcionário e prazo da sessão de demonstração.                |
 | `Conversation`  | Funcionário, analista responsável, estado e datas.                           |
 | `Message`       | Autor, texto e ordem temporal de cada conversa.                              |
 | `Ticket`        | Número único, dono, pessoa afetada, classificação, estado e próximos prazos. |
@@ -17,8 +18,8 @@ As relações e índices permitem consultar conversas por funcionário, a fila d
 
 ## Preparação
 
-1. Disponibilizar PostgreSQL e copiar `.env.example` para `.env`, ajustando `DATABASE_URL`. Para teste local sem servidor instalado, Prisma 7 oferece `pnpm exec prisma dev`; copiar também a URL de shadow para `SHADOW_DATABASE_URL` ao usar `db:migrate`.
+1. Iniciar o PostgreSQL local com `docker compose up -d --wait postgres` e copiar a linha `DATABASE_URL` de `.env.example` para `.env`. Para a aplicação web, copiar `.env.example` para `apps/web/.env.local`.
 2. Executar `pnpm install` (gera o cliente Prisma) e `pnpm db:deploy` para aplicar a migração existente. Para criar uma migração após alterar o esquema, usar `pnpm db:migrate --name <nome>` e `pnpm db:generate`.
 3. Executar `pnpm db:smoke`. O script grava uma conversa e uma decisão, fecha a ligação, relê os dados com outra ligação e remove os dados temporários.
 
-O esquema define a estrutura; as próximas etapas implementarão autorização, transições válidas de estado, cálculo de SLA, validação do rascunho e confirmação antes de alterar chamados. Essas regras pertencem aos serviços da aplicação e não devem depender apenas do agente de IA.
+O esquema define a estrutura. A etapa 6 acrescentou autenticação e autorização de leitura por sessão. As próximas etapas implementarão transições válidas de estado, cálculo de SLA, validação do rascunho e confirmação antes de alterar chamados. Essas regras pertencem aos serviços da aplicação e não devem depender apenas do agente de IA.

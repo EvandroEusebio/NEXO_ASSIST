@@ -1,6 +1,7 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  importFileExtension = "ts"
 }
 
 datasource db {
@@ -74,6 +75,7 @@ model User {
   name                  String         @db.VarChar(160)
   email                 String         @unique @db.VarChar(320)
   role                  UserRole       @default(EMPLOYEE)
+  demoLoginEnabled      Boolean        @default(false)
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
   conversations         Conversation[] @relation("EmployeeConversations")
@@ -82,6 +84,18 @@ model User {
   affectedTickets       Ticket[]       @relation("AffectedTickets")
   authoredMessages      Message[]
   ticketEvents          TicketEvent[]
+  authSessions          AuthSession[]
+}
+
+model AuthSession {
+  tokenHash String   @id @db.VarChar(64)
+  userId    String   @db.Uuid
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Conversation {
@@ -92,6 +106,7 @@ model Conversation {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   closedAt          DateTime?
+  revision          Int                @default(0)
   employee          User               @relation("EmployeeConversations", fields: [employeeId], references: [id], onDelete: Restrict)
   assignedAnalyst   User?              @relation("AnalystConversations", fields: [assignedAnalystId], references: [id], onDelete: SetNull)
   messages          Message[]
@@ -108,6 +123,8 @@ model Message {
   author         MessageAuthor
   authorUserId   String?        @db.Uuid
   content        String         @db.Text
+  requestId      String?        @unique @db.Uuid
+  metadata       Json?
   createdAt      DateTime       @default(now())
   conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   authorUser     User?          @relation(fields: [authorUserId], references: [id], onDelete: SetNull)

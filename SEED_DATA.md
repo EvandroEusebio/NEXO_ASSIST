@@ -12,4 +12,4 @@ A central de ajuda inclui VPN/erro 809 com a restrição a Windows 10, horário 
 2. Executar `pnpm db:seed`. O comando chama `prisma db seed`, configurado no `prisma.config.ts`.
 3. Executar `pnpm db:seed:check` para confirmar a cobertura dos cenários. Repetir `pnpm db:seed` quando quiser restaurar os exemplos. O seed atualiza os seus utilizadores, artigos e chamados pelos e-mails, IDs e números reservados.
 
-O login e as regras de acesso ainda serão implementados. O seed não cria senhas nem sessões. Os e-mails dos funcionários de exemplo são `ana.souza@nexo.com.br`, `bruno.tavares@nexo.com.br`, `carla.mendes@nexo.com.br`, `diego.ramos@nexo.com.br` e `elisa.prado@nexo.com.br`.
+O seed habilita o login de demonstração apenas para os cinco funcionários; não cria senhas nem sessões. Consulte `AUTH_DEMO.md` para iniciar a aplicação. Os e-mails são `ana.souza@nexo.com.br`, `bruno.tavares@nexo.com.br`, `carla.mendes@nexo.com.br`, `diego.ramos@nexo.com.br` e `elisa.prado@nexo.com.br`.

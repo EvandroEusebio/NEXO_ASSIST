@@ -9,6 +9,10 @@
     "prisma/seed.ts",
     "scripts/db-smoke.ts",
     "scripts/check-seed.ts",
-    "src/generated/prisma/**/*.ts"
+    "src/generated/prisma/**/*.ts",
+    "src/services/**/*.ts",
+    "scripts/check-tickets.ts",
+    "scripts/check-auth.ts",
+    "scripts/check-chat.ts"
   ]
 }

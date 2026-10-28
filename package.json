@@ -17,7 +17,10 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "db:seed:check": "tsx scripts/check-seed.ts",
-    "db:smoke": "tsx scripts/db-smoke.ts"
+    "db:smoke": "tsx scripts/db-smoke.ts",
+    "tickets:check": "tsx scripts/check-tickets.ts",
+    "auth:check": "tsx scripts/check-auth.ts",
+    "chat:check": "tsx scripts/check-chat.ts"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
