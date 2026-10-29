@@ -20,7 +20,10 @@
     "db:smoke": "tsx scripts/db-smoke.ts",
     "tickets:check": "tsx scripts/check-tickets.ts",
     "auth:check": "tsx scripts/check-auth.ts",
-    "chat:check": "tsx scripts/check-chat.ts"
+    "chat:check": "tsx scripts/check-chat.ts",
+    "chat:check:live": "tsx scripts/check-chat.ts --live",
+    "agent:check": "tsx scripts/check-agent.ts",
+    "agent:check:live": "tsx scripts/check-agent.ts --live"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",

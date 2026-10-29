@@ -13,7 +13,7 @@ O login abre `/chat`. A interface segue as referências `Chat — Novo chamado` 
 
 ## Limites desta etapa
 
-As respostas são guiadas por ações explícitas. Texto livre recebe orientação para as opções disponíveis; não há interpretação por LLM nesta etapa. A integração do agente é a etapa 8. Classificação automática/SLA, deduplicação por problema, alteração/reabertura de chamados e encaminhamento automático continuam nas etapas 9–12. O console que permite ao analista responder pertence à etapa 13. Os textos de atividade exibidos descrevem operações realmente executadas; não há métricas de confiança inventadas.
+Na etapa 8, texto livre passou a usar Mastra com Groq, conforme `AGENT_CORE.md`. Os botões continuam a executar ações explícitas sem consumir o LLM. Abertura e complemento de chamados usam rascunhos confirmados. Classificação por impacto/urgência e SLA, deduplicação por problema, reabertura e encaminhamento automático continuam nas etapas 9–12. O console que permite ao analista responder pertence à etapa 13.
 
 ## Executar e testar
 

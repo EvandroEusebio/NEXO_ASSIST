@@ -81,7 +81,7 @@ export const styles = {
   composer:
     "flex items-center gap-2 rounded-xl border border-border bg-white p-[5px] focus-within:border-ring",
   composerInput:
-    "max-h-[140px] min-h-9 min-w-0 flex-1 resize-y rounded-none border-0 bg-transparent px-2.5 py-[7px] shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0",
+    "max-h-[10px] min-h-9 min-w-0 flex-1 resize-y rounded-none border-0 bg-transparent px-2.5 py-[7px] shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 ",
   counter: "mt-[5px] text-right text-xs text-muted-foreground",
   notice:
     "my-2.5 rounded-lg bg-[#fff6e5] px-3 py-2.5 text-[13px] text-[#946300]",

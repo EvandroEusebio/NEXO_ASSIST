@@ -324,7 +324,12 @@ export function Chat({
     return (
       <Card className={styles.card}>
         <div className={styles.cardHeading}>
-          <span>Novo chamado · Rascunho {draft.id.slice(0, 8)}</span>
+          <span>
+            {draft.operation === "UPDATE"
+              ? `Atualizar ${draft.targetTicket?.number}`
+              : "Novo chamado"}{" "}
+            · Rascunho {draft.id.slice(0, 8)}
+          </span>
           <Badge
             variant="secondary"
             className={draft.status === "PENDING" ? styles.warning : undefined}
@@ -355,7 +360,11 @@ export function Chat({
           </div>
           <div className={styles.fact}>
             <dt className={styles.factLabel}>Afetados</dt>
-            <dd className={styles.factValue}>Somente você</dd>
+            <dd className={styles.factValue}>
+              {draft.operation === "UPDATE"
+                ? "Mantidos do chamado"
+                : "Somente você"}
+            </dd>
           </div>
         </dl>
         {draft.status === "PENDING" && (
@@ -365,11 +374,16 @@ export function Chat({
               className={styles.primary}
               disabled={disabled || !!human}
               onClick={() =>
-                void send("Confirmo a criação deste chamado.", {
-                  type: "confirm",
-                  draftId: draft.id,
-                  version: draft.version,
-                })
+                void send(
+                  draft.operation === "UPDATE"
+                    ? "Confirmo a atualização deste chamado."
+                    : "Confirmo a criação deste chamado.",
+                  {
+                    type: "confirm",
+                    draftId: draft.id,
+                    version: draft.version,
+                  }
+                )
               }
             >
               Confirmar
@@ -421,14 +435,14 @@ export function Chat({
             <MessageSquare size={16} />
             Atendimento
           </Link>
-          <Button
+          <Link
             className={styles.navItem}
-            variant="ghost"
+            href="#"
             onClick={() => setProfileOpen(true)}
           >
             <UserRound size={16} />
             Meu perfil
-          </Button>
+          </Link>
         </nav>
         <div className={styles.history}>
           <Button
@@ -701,14 +715,13 @@ export function Chat({
               if (content.trim()) void send(content.trim())
             }}
           >
-            <Textarea
+            <Input
               className={styles.composerInput}
               aria-label="Mensagem para o Nexo"
               placeholder="Escreva para o Nexo…"
               value={content}
               maxLength={4000}
               disabled={disabled}
-              rows={1}
               onChange={(e) => setContent(e.target.value)}
               onKeyDown={(e) => {
                 if (
@@ -771,7 +784,10 @@ function DraftEditor({
     onSave({
       title: String(data.get("title")),
       description: String(data.get("description")),
-      type: data.get("type") as "INC" | "REQ",
+      type:
+        draft?.operation === "UPDATE"
+          ? draft.payload.type
+          : (data.get("type") as "INC" | "REQ"),
       category: String(data.get("category")),
       priority: String(data.get("priority")),
     })
@@ -783,7 +799,7 @@ function DraftEditor({
           {draft ? "Editar rascunho" : "Novo chamado"}
         </h3>
         <p className={styles.cardDescription}>
-          Preencha os dados. O chamado será criado depois da sua confirmação.
+          Preencha os dados. A operação será aplicada depois da sua confirmação.
         </p>
         <div className={styles.editorField}>
           <Label htmlFor="draft-title">Título</Label>
@@ -814,6 +830,7 @@ function DraftEditor({
             <Select
               items={typeOptions}
               name="type"
+              disabled={draft?.operation === "UPDATE"}
               defaultValue={draft?.payload.type ?? "INC"}
             >
               <SelectTrigger className={styles.editorControl} id="draft-type">
@@ -873,7 +890,10 @@ function DraftEditor({
             </Select>
           </div>
         </div>
-        <p className={styles.editorHint}>Pessoa afetada: você</p>
+        <p className={styles.editorHint}>
+          Pessoa afetada:{" "}
+          {draft?.operation === "UPDATE" ? "mantida do chamado" : "você"}
+        </p>
         <div className={styles.options}>
           <Button type="submit" disabled={busy} className={styles.primary}>
             Rever rascunho

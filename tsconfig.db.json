@@ -13,6 +13,8 @@
     "src/services/**/*.ts",
     "scripts/check-tickets.ts",
     "scripts/check-auth.ts",
-    "scripts/check-chat.ts"
+    "scripts/check-chat.ts",
+    "scripts/check-agent.ts",
+    "src/mastra/**/*.ts"
   ]
 }

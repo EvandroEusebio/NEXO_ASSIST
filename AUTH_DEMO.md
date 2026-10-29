@@ -10,7 +10,7 @@ A sessão dura no máximo sete dias. Com “Manter conectado” desmarcado, o co
 docker compose up -d --wait postgres
 ```
 
-Adicione a linha `DATABASE_URL` de `.env.example` ao `.env` da raiz (preserve as outras variáveis existentes) e copie `.env.example` para `apps/web/.env.local`. Depois:
+Configure `DATABASE_URL` e `GROQ_API_KEY` no `.env` da raiz, preservando as variáveis existentes. O Next.js carrega esse arquivo no servidor; valores em `apps/web/.env.local`, se usados, têm precedência. Não coloque a chave em variáveis `NEXT_PUBLIC_*`. Depois:
 
 ```sh
 pnpm db:generate
@@ -25,6 +25,6 @@ Abra `http://localhost:3000/login`. Use, por exemplo, `ana.souza@nexo.com.br` ou
 
 Inicie a aplicação na porta 3100 com `pnpm --filter web dev --port 3100` e execute `pnpm auth:check` noutro terminal. O teste HTTP verifica login de Ana e Bruno, rejeição de analista e e-mail desconhecido, sessões distintas, listas isoladas, 404 para acesso cruzado e revogação após logout. Também há `pnpm db:typecheck`, `pnpm --filter web lint` e `pnpm --filter web build`.
 
-Rotas disponíveis: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/session`, `GET /api/tickets` e `GET /api/tickets/:number`. A criação está disponível pelo rascunho confirmado do chat; alterações e reaberturas serão integradas nas próximas etapas.
+Rotas disponíveis: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/session`, `GET /api/tickets` e `GET /api/tickets/:number`. Criação e complemento estão disponíveis pelo rascunho confirmado do chat; reabertura será integrada nas próximas etapas. O agente está documentado em `AGENT_CORE.md`.
 
 A tela de identificação segue a referência visual em `docs/Identificação (desktop) (1).png`, com adaptação para telemóvel. Os controlos usam a biblioteca shadcn/ui do projeto, documentada em `UI_COMPONENTS.md`. O controlo do olho alterna a visibilidade da senha; os links de ajuda e privacidade abrem informações da demonstração. A conversa e os indicadores do painel esquerdo são ilustrativos.

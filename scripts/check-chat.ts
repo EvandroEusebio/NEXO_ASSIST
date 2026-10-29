@@ -82,8 +82,8 @@ async function main() {
     404
   )
   const replayId = randomUUID()
-  const first = await send(undefined, replayId)
-  const replay = await send(undefined, replayId)
+  const first = await send({ type: "tickets" }, replayId)
+  const replay = await send({ type: "tickets" }, replayId)
   assert.equal(first.messageCount, 1)
   assert.equal(replay.messageCount, 1)
   assert.equal(replay.messages.length, first.messages.length)
@@ -173,7 +173,7 @@ async function main() {
   const timeout = setTimeout(() => abort.abort(), 15000)
   try {
     const before = await event()
-    await send()
+    await send({ type: "help" })
     let update = await event()
     while (update.messageCount <= before.messageCount) update = await event()
     assert.ok(update.messageCount > before.messageCount)
@@ -213,6 +213,7 @@ async function main() {
       request(`/api/conversations/${limitId}/messages`, owner, {
         requestId: randomUUID(),
         content: "Última vaga",
+        action: { type: "tickets" },
       })
     )
   )
@@ -222,6 +223,21 @@ async function main() {
     owner
   )
   assert.equal(limited.messageCount, 30)
+  if (process.argv.includes("--live")) {
+    const liveId = randomUUID()
+    await json("/api/conversations", owner, { id: liveId })
+    const live = await json<ChatSnapshot>(
+      `/api/conversations/${liveId}/messages`,
+      owner,
+      {
+        requestId: randomUUID(),
+        content: "Como resolver o erro 809 da VPN no Windows 10?",
+      }
+    )
+    assert.equal(live.messages.at(-1)?.author, "AGENT")
+    assert.match(live.messages.at(-1)!.content, /Fonte:/)
+    console.log("Next.js → Mastra → Groq → resposta com fontes: OK")
+  }
   assert.equal(
     (
       await request(`/api/conversations/${limitId}/messages`, owner, {

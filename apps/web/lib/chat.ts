@@ -6,6 +6,7 @@ import {
   ConversationError,
 } from "../../../src/services/conversations"
 import { TicketServiceError } from "../../../src/services/tickets"
+import { AgentUnavailableError } from "../../../src/services/agent"
 export const conversations = () => createConversationService(getPrismaClient())
 export async function chatResponse(
   request: Request,
@@ -24,6 +25,8 @@ export async function chatResponse(
       headers: { "Cache-Control": "no-store" },
     })
   } catch (error) {
+    if (error instanceof AgentUnavailableError)
+      return NextResponse.json({ error: error.message }, { status: 503 })
     if (error instanceof ConversationError)
       return NextResponse.json(
         { error: error.message },

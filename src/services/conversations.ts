@@ -1,7 +1,13 @@
 import { z } from "zod"
 import { Prisma, type PrismaClient } from "../generated/prisma/client"
-import { createTicketService, ticketFields } from "./tickets"
+import {
+  createTicketService,
+  ticketFields,
+  TicketServiceError,
+} from "./tickets"
 import { MESSAGE_LIMIT } from "../contracts/chat"
+import { agentPlan, type AgentPlanner, type AgentRun } from "../contracts/agent"
+import { searchHelp } from "./knowledge"
 
 export class ConversationError extends Error {
   constructor(
@@ -54,7 +60,10 @@ function parse<T>(schema: z.ZodType<T>, data: unknown): T {
   return result.data
 }
 
-export function createConversationService(db: PrismaClient) {
+export function createConversationService(
+  db: PrismaClient,
+  options: { plan?: AgentPlanner } = {}
+) {
   async function employee(id: string) {
     parse(uuid, id)
     const user = await db.user.findUnique({
@@ -148,6 +157,107 @@ export function createConversationService(db: PrismaClient) {
       parse(uuid, id)
       await employee(employeeId)
       const data = parse(sendInput, input)
+      let run: AgentRun | undefined
+      let plannedRevision: number | undefined
+      let command:
+        | z.infer<typeof action>
+        | { type: "agent-help"; query: string }
+        | { type: "agent-update"; number: string; addition: string }
+        | { type: "clarify"; question: string }
+        | undefined = data.action
+      if (!data.action) {
+        const context = await db.conversation.findFirst({
+          where: { id, employeeId },
+          include: {
+            messages: {
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              take: 10,
+            },
+            _count: {
+              select: {
+                messages: { where: { author: "EMPLOYEE" } },
+                drafts: { where: { status: "PENDING" } },
+              },
+            },
+          },
+        })
+        if (!context)
+          throw new ConversationError(404, "Conversa não encontrada.")
+        const replay = await db.message.findUnique({
+          where: { requestId: data.requestId },
+        })
+        if (replay) {
+          if (
+            replay.conversationId !== id ||
+            replay.authorUserId !== employeeId
+          )
+            throw new ConversationError(409, "Pedido já utilizado.")
+          return snapshot(employeeId, id)
+        }
+        if (
+          context.status === "CLOSED" ||
+          context._count.messages >= MESSAGE_LIMIT
+        )
+          throw new ConversationError(
+            409,
+            "Conversa encerrada ou limite atingido. Inicie uma nova conversa."
+          )
+        if (
+          context._count.messages === MESSAGE_LIMIT - 1 &&
+          context._count.drafts
+        )
+          throw new ConversationError(
+            409,
+            "Use a última mensagem para confirmar ou cancelar o rascunho pendente."
+          )
+        if (context.status === "AGENT_ACTIVE") {
+          // No database transaction/row lock is held while waiting for Groq.
+          const planner = options.plan ?? (await import("./agent")).planWithNexo
+          run = await planner({
+            content: data.content,
+            history: context.messages.reverse(),
+          })
+          const plan = parse(agentPlan, run.plan)
+          plannedRevision = context.revision
+          if (plan.confidence < 0.65) {
+            command = {
+              type: "clarify",
+              question:
+                "Preciso de mais detalhes para agir com segurança. Quer orientação, consultar um chamado, abrir um pedido ou falar com um analista?",
+            }
+          } else {
+            switch (plan.intent) {
+              case "help":
+                command = { type: "agent-help", query: plan.query }
+                break
+              case "tickets":
+                command = plan.number
+                  ? { type: "ticket", number: plan.number }
+                  : { type: "tickets" }
+                break
+              case "create":
+                command = {
+                  type: "draft",
+                  fields: { ...plan.fields, priority: "MEDIUM" },
+                }
+                break
+              case "update":
+                command = {
+                  type: "agent-update",
+                  number: plan.number,
+                  addition: plan.addition,
+                }
+                break
+              case "handoff":
+                command = { type: "handoff" }
+                break
+              case "clarify":
+                command = { type: "clarify", question: plan.question }
+                break
+            }
+          }
+        }
+      }
       await db.$transaction(
         async (tx) => {
           // The row update serializes all writes for this conversation, including count and confirmation.
@@ -171,6 +281,14 @@ export function createConversationService(db: PrismaClient) {
           const conversation = await tx.conversation.findUniqueOrThrow({
             where: { id },
           })
+          if (
+            plannedRevision !== undefined &&
+            conversation.revision !== plannedRevision + 1
+          )
+            throw new ConversationError(
+              409,
+              "A conversa mudou enquanto o assistente respondia. Atualize e tente novamente."
+            )
           if (conversation.status === "CLOSED")
             throw new ConversationError(
               409,
@@ -184,7 +302,10 @@ export function createConversationService(db: PrismaClient) {
               409,
               "Limite de 30 mensagens atingido. Inicie uma nova conversa."
             )
-          if (data.action?.type === "draft" && count >= MESSAGE_LIMIT - 1)
+          if (
+            ["draft", "agent-update"].includes(command?.type ?? "") &&
+            count >= MESSAGE_LIMIT - 1
+          )
             throw new ConversationError(
               409,
               "Inicie uma nova conversa para preparar um rascunho e ter espaço para o confirmar."
@@ -229,9 +350,39 @@ export function createConversationService(db: PrismaClient) {
             tx.message.create({
               data: {
                 conversationId: id,
-                author: "SYSTEM",
+                author: run ? "AGENT" : "SYSTEM",
                 content,
-                metadata,
+                metadata: {
+                  ...metadata,
+                  ...(run
+                    ? {
+                        agent: {
+                          model: run.model,
+                          tool: run.tool,
+                          inputTokens: run.inputTokens ?? 0,
+                          outputTokens: run.outputTokens ?? 0,
+                        },
+                      }
+                    : {}),
+                },
+                ...(run
+                  ? {
+                      decision: {
+                        create: {
+                          intent: run.plan.intent,
+                          action: String(
+                            metadata.kind ?? command?.type ?? "clarify"
+                          ),
+                          confidence: run.plan.confidence,
+                          reasonSummary: run.plan.reason,
+                          evidenceSummary: metadata.sourceIds
+                            ? JSON.stringify(metadata.sourceIds)
+                            : null,
+                          resultSummary: content.slice(0, 500),
+                        },
+                      },
+                    }
+                  : {}),
                 createdAt: new Date(
                   Math.max(Date.now(), sent.createdAt.getTime() + 1)
                 ),
@@ -239,7 +390,6 @@ export function createConversationService(db: PrismaClient) {
             })
           if (conversation.status !== "AGENT_ACTIVE") return
           const tickets = createTicketService(db, { transaction: tx })
-          const command = data.action
           if (command?.type === "tickets") {
             const list = await tickets.list(employeeId)
             await reply(
@@ -249,12 +399,85 @@ export function createConversationService(db: PrismaClient) {
               { kind: "tickets", activity: "consultou seus chamados" }
             )
           } else if (command?.type === "ticket") {
-            const ticket = await tickets.get(employeeId, command.number)
+            const ticket = await tickets
+              .get(employeeId, command.number)
+              .catch((error: unknown) => {
+                if (
+                  run &&
+                  error instanceof TicketServiceError &&
+                  error.code === "NOT_FOUND"
+                )
+                  return null
+                throw error
+              })
+            if (!ticket) {
+              await reply(
+                "Não encontrei esse chamado entre os seus chamados.",
+                { kind: "not-found" }
+              )
+              return
+            }
             await reply(`Consulte os detalhes do chamado ${ticket.number}.`, {
               kind: "ticket",
               number: ticket.number,
               activity: `consultou ${ticket.number}`,
             })
+          } else if (command?.type === "agent-update") {
+            const ticket = await tickets
+              .get(employeeId, command.number)
+              .catch((error: unknown) => {
+                if (
+                  error instanceof TicketServiceError &&
+                  error.code === "NOT_FOUND"
+                )
+                  return null
+                throw error
+              })
+            if (!ticket) {
+              await reply(
+                "Não encontrei esse chamado entre os seus chamados.",
+                { kind: "not-found" }
+              )
+              return
+            }
+            if (["RESOLVED", "CLOSED"].includes(ticket.status)) {
+              await reply(
+                "Este chamado está resolvido ou encerrado. Peça atendimento a um analista para avaliar a reabertura.",
+                { kind: "clarify" }
+              )
+              return
+            }
+            const fields = parse(ticketFields, {
+              title: ticket.title,
+              description: `${ticket.description}\n\nComplemento: ${command.addition}`,
+              type: ticket.type,
+              category: ticket.category,
+              priority: ticket.priority,
+              affectedUserId: ticket.affectedUserId,
+            })
+            await tx.ticketDraft.updateMany({
+              where: { conversationId: id, status: "PENDING" },
+              data: { status: "EXPIRED" },
+            })
+            const draft = await tx.ticketDraft.create({
+              data: {
+                conversationId: id,
+                operation: "UPDATE",
+                targetTicketId: ticket.id,
+                payload: {
+                  ...fields,
+                  expectedUpdatedAt: ticket.updatedAt.toISOString(),
+                },
+              },
+            })
+            await reply(
+              `Confira o complemento do chamado ${ticket.number}. A alteração só será aplicada depois de confirmar.`,
+              {
+                kind: "draft",
+                draftId: draft.id,
+                activity: "preparou um complemento para confirmação",
+              }
+            )
           } else if (command?.type === "draft") {
             let draft
             if (command.draftId) {
@@ -271,10 +494,29 @@ export function createConversationService(db: PrismaClient) {
                   409,
                   "O rascunho mudou. Atualize a conversa antes de editar."
                 )
+              let preserved: {
+                affectedUserId: string
+                expectedUpdatedAt?: string
+              } = { affectedUserId: employeeId }
+              if (draft.operation === "UPDATE") {
+                const stored = parse(
+                  ticketFields.extend({ expectedUpdatedAt: z.string() }),
+                  draft.payload
+                )
+                if (command.fields.type !== stored.type)
+                  throw new ConversationError(
+                    400,
+                    "O tipo de um chamado existente não pode ser alterado."
+                  )
+                preserved = {
+                  affectedUserId: stored.affectedUserId,
+                  expectedUpdatedAt: stored.expectedUpdatedAt,
+                }
+              }
               draft = await tx.ticketDraft.update({
                 where: { id: draft.id },
                 data: {
-                  payload: { ...command.fields, affectedUserId: employeeId },
+                  payload: { ...command.fields, ...preserved },
                   version: { increment: 1 },
                 },
               })
@@ -292,7 +534,7 @@ export function createConversationService(db: PrismaClient) {
               })
             }
             await reply(
-              "Confira os dados antes de criar o chamado. Pode confirmar, editar ou cancelar.",
+              "Confira os dados antes de confirmar a operação. Pode confirmar, editar ou cancelar.",
               {
                 kind: "draft",
                 draftId: draft.id,
@@ -310,7 +552,7 @@ export function createConversationService(db: PrismaClient) {
               throw new ConversationError(404, "Rascunho não encontrado.")
             if (draft.status === "CONFIRMED" && command.type === "confirm") {
               await reply(
-                "Este rascunho já foi confirmado; o chamado não foi duplicado."
+                "Este rascunho já foi confirmado; a operação não foi repetida."
               )
               return
             }
@@ -324,10 +566,46 @@ export function createConversationService(db: PrismaClient) {
                 where: { id: draft.id },
                 data: { status: "CANCELLED" },
               })
-              await reply("Rascunho cancelado. Nenhum chamado foi criado.")
+              await reply("Rascunho cancelado. Nenhuma alteração foi aplicada.")
             } else {
-              const fields = parse(ticketFields, draft.payload)
-              const ticket = await tickets.create(employeeId, fields)
+              const { expectedUpdatedAt, ...fields } = parse(
+                ticketFields.extend({
+                  expectedUpdatedAt: z.string().optional(),
+                }),
+                draft.payload
+              )
+              let ticket
+              if (draft.operation === "UPDATE") {
+                if (!draft.targetTicketId)
+                  throw new ConversationError(404, "Chamado não encontrado.")
+                const target = await tx.ticket.findFirst({
+                  where: { id: draft.targetTicketId, openedById: employeeId },
+                })
+                if (!target)
+                  throw new ConversationError(404, "Chamado não encontrado.")
+                if (target.updatedAt.toISOString() !== expectedUpdatedAt)
+                  throw new ConversationError(
+                    409,
+                    "O chamado mudou. Cancele este rascunho e prepare um novo complemento."
+                  )
+                // Lock against concurrent service updates before applying the approved snapshot.
+                const lockedTicket = await tx.ticket.updateMany({
+                  where: { id: target.id, updatedAt: target.updatedAt },
+                  data: { updatedAt: new Date() },
+                })
+                if (!lockedTicket.count)
+                  throw new ConversationError(
+                    409,
+                    "O chamado mudou. Prepare um novo complemento."
+                  )
+                ticket = await tickets.update(employeeId, target.number, fields)
+              } else if (draft.operation === "CREATE") {
+                ticket = await tickets.create(employeeId, fields)
+              } else
+                throw new ConversationError(
+                  409,
+                  "Operação ainda não disponível."
+                )
               await tx.ticketDraft.update({
                 where: { id: draft.id },
                 data: {
@@ -337,11 +615,11 @@ export function createConversationService(db: PrismaClient) {
                 },
               })
               await reply(
-                `Chamado ${ticket.number} criado com os dados confirmados.`,
+                `Chamado ${ticket.number} ${draft.operation === "UPDATE" ? "atualizado" : "criado"} com os dados confirmados.`,
                 {
                   kind: "ticket",
                   number: ticket.number,
-                  activity: "criou o chamado após confirmação",
+                  activity: `${draft.operation === "UPDATE" ? "atualizou" : "criou"} o chamado após confirmação`,
                 }
               )
             }
@@ -354,6 +632,27 @@ export function createConversationService(db: PrismaClient) {
               "Solicitação de atendimento humano registada. A conversa está a aguardar um analista; pode acrescentar informações enquanto espera.",
               { kind: "handoff", activity: "encaminhou a conversa" }
             )
+          } else if (command?.type === "agent-help") {
+            const articles = await searchHelp(tx, command.query)
+            await reply(
+              articles.length
+                ? articles
+                    .map(
+                      (article) => `Fonte: ${article.title}\n${article.content}`
+                    )
+                    .join("\n\n")
+                : "Não encontrei uma orientação correspondente na central de ajuda. Pode descrever melhor o problema ou pedir um analista.",
+              {
+                kind: "help",
+                activity: "pesquisou a central de ajuda",
+                sourceIds: articles.map((article) => article.id),
+              }
+            )
+          } else if (command?.type === "clarify") {
+            await reply(command.question, {
+              kind: "welcome",
+              activity: "pediu esclarecimento",
+            })
           } else if (command?.type === "help") {
             const articles = await tx.helpArticle.findMany({
               orderBy: { title: "asc" },

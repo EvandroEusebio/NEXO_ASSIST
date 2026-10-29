@@ -60,6 +60,7 @@ export type ChatMessage = {
 }
 export type ChatDraft = {
   id: string
+  operation: "CREATE" | "UPDATE" | "REOPEN"
   status: string
   version: number
   payload: DraftFields

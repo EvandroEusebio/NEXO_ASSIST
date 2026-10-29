@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
+import { LogOut } from "lucide-react"
 
 export function LogoutButton() {
   const router = useRouter()
@@ -25,13 +26,14 @@ export function LogoutButton() {
   }
 
   return (
-    <div className="text-right">
+    <div >
       <Button
-        variant="outline"
+        variant="ghost"
         onClick={logout}
         disabled={pending}
-        className="rounded-md border border-[#e6e8ec] px-4 py-2 text-sm font-medium hover:bg-[#f6f7f9] disabled:opacity-60"
+        className="py-2 text-sm font-medium disabled:opacity-60 cursor-pointer"
       >
+        <LogOut size={16}/>
         {pending ? "A sair…" : "Sair"}
       </Button>
       {error && (
