@@ -75,13 +75,13 @@ const users: SeedUser[] = [
     name: "Rafael Lima",
     email: "rafael.lima@nexo.com.br",
     role: "ANALYST",
-    demoLoginEnabled: false,
+    demoLoginEnabled: true,
   },
   {
     name: "Marta Alves",
     email: "marta.alves@nexo.com.br",
     role: "ANALYST",
-    demoLoginEnabled: false,
+    demoLoginEnabled: true,
   },
 ]
 

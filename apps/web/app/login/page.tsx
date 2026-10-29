@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation"
-import { currentEmployee } from "@/lib/auth"
+import { currentUser } from "@/lib/auth"
 import { LoginForm, LoginNotice } from "./login-form"
 import { Card } from "@workspace/ui/components/card"
 import { styles } from "./styles"
 
 export default async function LoginPage() {
-  const user = await currentEmployee()
-  if (user) redirect("/chat")
+  const user = await currentUser()
+  if (user) redirect(user.role === "ANALYST" ? "/analyst" : "/chat")
 
   return (
     <main className={styles.screen}>

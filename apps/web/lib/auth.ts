@@ -8,9 +8,19 @@ export function authService() {
   return createAuthService(getPrismaClient())
 }
 
-export async function currentEmployee() {
+export async function currentUser() {
   const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value
   return token ? authService().currentUser(token) : null
+}
+
+export async function currentEmployee() {
+  const user = await currentUser()
+  return user?.role === "EMPLOYEE" ? user : null
+}
+
+export async function currentAnalyst() {
+  const user = await currentUser()
+  return user?.role === "ANALYST" ? user : null
 }
 
 export function sameOrigin(request: Request) {

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
-import { currentEmployee } from "@/lib/auth"
+import { currentUser } from "@/lib/auth"
 
 export default async function Home() {
-  const user = await currentEmployee()
-  redirect(user ? "/chat" : "/login")
+  const user = await currentUser()
+  redirect(user ? (user.role === "ANALYST" ? "/analyst" : "/chat") : "/login")
 }

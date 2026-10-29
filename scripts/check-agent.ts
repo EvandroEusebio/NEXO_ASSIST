@@ -19,6 +19,15 @@ const fields = {
   type: "INC" as const,
   category: "HARDWARE" as const,
 }
+const proposedFields = {
+  title: "Monitor sem imagem",
+  description:
+    "O meu monitor ficou sem imagem; não tenho outro e preciso trabalhar hoje.",
+  type: "INC" as const,
+  category: "HARDWARE" as const,
+  impact: "PERSON_BLOCKED" as const,
+  urgency: "SAME_DAY" as const,
+}
 let nextPlan: AgentPlan = {
   intent: "help",
   query: "vpn erro 809",
@@ -103,7 +112,7 @@ async function main() {
 
   nextPlan = {
     intent: "create",
-    fields,
+    fields: proposedFields,
     confidence: 0.95,
     reason: "Pedido explícito de abertura.",
   }
@@ -112,18 +121,39 @@ async function main() {
   const proposed = await service.send(
     owner,
     createId,
-    request("Abra um chamado: o meu notebook não liga desde hoje de manhã.")
+    request(
+      "Abra um chamado: o meu monitor ficou sem imagem; não tenho outro e preciso trabalhar hoje."
+    )
   )
   assert.equal(proposed.drafts.length, 1)
   assert.equal(proposed.drafts[0]!.operation, "CREATE")
+  assert.equal(
+    (proposed.drafts[0]!.payload as { priority: string }).priority,
+    "HIGH"
+  )
   assert.equal(
     await db.ticket.count({ where: { openedById: owner } }),
     before,
     "Não criar sem confirmação"
   )
   if (live) {
+    await db.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        status: "RESOLVED",
+        resolvedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      },
+    })
+    const liveReopen = await service.send(
+      owner,
+      await conversation(),
+      request(
+        `Reabra o chamado ${ticket.number}: o notebook voltou a falhar; não liga.`
+      )
+    )
+    assert.equal(liveReopen.drafts[0]?.operation, "REOPEN")
     console.log(
-      "Groq real: dúvida com fonte, consulta de chamados e abertura com rascunho: OK (3 chamadas)"
+      "Groq real: ajuda, consulta, abertura e reabertura com rascunho: OK (4 chamadas)"
     )
     return
   }
@@ -135,6 +165,44 @@ async function main() {
   assert.equal(
     await db.ticket.count({ where: { openedById: owner } }),
     before + 1
+  )
+  const created = await db.ticket.findFirstOrThrow({
+    where: { openedById: owner, title: proposedFields.title },
+  })
+  nextPlan = {
+    intent: "create",
+    fields: {
+      ...proposedFields,
+      description: "O monitor continua sem imagem após trocar o cabo.",
+    },
+    confidence: 0.95,
+    reason: "Tentativa de abertura para o mesmo problema.",
+  }
+  const duplicateId = await conversation()
+  const duplicate = await service.send(
+    owner,
+    duplicateId,
+    request("Abra outro chamado para o monitor sem imagem; troquei o cabo.")
+  )
+  assert.equal(duplicate.drafts.length, 1)
+  assert.equal(duplicate.drafts[0]!.operation, "UPDATE")
+  assert.equal(duplicate.drafts[0]!.targetTicketId, created.id)
+  await service.send(owner, duplicateId, {
+    ...request("Confirmo o complemento"),
+    action: {
+      type: "confirm",
+      draftId: duplicate.drafts[0]!.id,
+      version: duplicate.drafts[0]!.version,
+    },
+  })
+  assert.equal(
+    await db.ticket.count({ where: { openedById: owner } }),
+    before + 1
+  )
+  assert.match(
+    (await db.ticket.findUniqueOrThrow({ where: { id: created.id } }))
+      .description,
+    /trocar o cabo/
   )
 
   nextPlan = {
@@ -192,6 +260,81 @@ async function main() {
     (error) => error instanceof ConversationError && error.status === 409
   )
 
+  await db.ticket.update({
+    where: { id: ticket.id },
+    data: {
+      status: "RESOLVED",
+      resolvedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+      updatedAt: new Date(),
+    },
+  })
+  nextPlan = {
+    intent: "reopen",
+    number: ticket.number,
+    reasonToReopen: "O notebook voltou a falhar.",
+    confidence: 0.95,
+    reason: "Problema voltou após resolução recente.",
+  }
+  const reopenId = await conversation()
+  const reopening = await service.send(
+    owner,
+    reopenId,
+    request(`Reabra ${ticket.number}: o notebook voltou a falhar.`)
+  )
+  assert.equal(reopening.drafts[0]!.operation, "REOPEN")
+  assert.equal(
+    (await db.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).status,
+    "RESOLVED"
+  )
+  const reopenAction = {
+    type: "confirm" as const,
+    draftId: reopening.drafts[0]!.id,
+    version: reopening.drafts[0]!.version,
+  }
+  await service.send(owner, reopenId, {
+    ...request("Confirmo"),
+    action: reopenAction,
+  })
+  await service.send(owner, reopenId, {
+    ...request("Confirmo de novo"),
+    action: reopenAction,
+  })
+  assert.equal(
+    (await db.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).status,
+    "OPEN"
+  )
+  assert.equal(
+    await db.ticketEvent.count({
+      where: { ticketId: ticket.id, action: "REOPENED" },
+    }),
+    1
+  )
+  const oldResolved = await db.ticket.create({
+    data: {
+      ...fields,
+      priority: "MEDIUM",
+      openedById: owner,
+      affectedUserId: owner,
+      number: `INC-${randomUUID().slice(0, 8)}`,
+      status: "RESOLVED",
+      resolvedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+    },
+  })
+  nextPlan = {
+    intent: "reopen",
+    number: oldResolved.number,
+    reasonToReopen: "O problema voltou.",
+    confidence: 0.95,
+    reason: "Reabertura após o prazo.",
+  }
+  const expired = await service.send(
+    owner,
+    await conversation(),
+    request(`Reabra ${oldResolved.number}`)
+  )
+  assert.equal(expired.drafts.length, 0)
+  assert.match(expired.messages.at(-1)!.content, /mais de 7 dias/)
+
   const foreign = await db.ticket.create({
     data: {
       ...fields,
@@ -216,9 +359,108 @@ async function main() {
   assert.equal(denied.drafts.length, 0)
   assert.match(denied.messages.at(-1)!.content, /Não encontrei/)
 
+  const vpnFields = {
+    title: "VPN erro 809",
+    description: "A VPN não conecta e mostra o erro 809.",
+    type: "INC" as const,
+    category: "NETWORK_VPN" as const,
+  }
+  const candidateNumbers: string[] = []
+  for (let index = 0; index < 2; index++) {
+    const candidate = await db.ticket.create({
+      data: {
+        ...vpnFields,
+        priority: "HIGH",
+        openedById: owner,
+        affectedUserId: owner,
+        number: `INC-${randomUUID().slice(0, 8)}`,
+      },
+    })
+    candidateNumbers.push(candidate.number)
+  }
+  const foreignCandidate = await db.ticket.create({
+    data: {
+      ...vpnFields,
+      priority: "HIGH",
+      openedById: other,
+      affectedUserId: other,
+      number: `INC-${randomUUID().slice(0, 8)}`,
+    },
+  })
   nextPlan = {
     intent: "create",
-    fields,
+    fields: {
+      ...vpnFields,
+      impact: "PERSON_BLOCKED",
+      urgency: "SAME_DAY",
+    },
+    confidence: 0.95,
+    reason: "Possível problema já registrado.",
+  }
+  const ambiguous = await service.send(
+    owner,
+    await conversation(),
+    request("Abra chamado para VPN erro 809")
+  )
+  assert.equal(ambiguous.drafts.length, 0)
+  const suggested = (
+    ambiguous.messages.at(-1)!.metadata as { candidateNumbers: string[] }
+  ).candidateNumbers
+  assert.deepEqual([...suggested].sort(), candidateNumbers.sort())
+  assert.ok(!suggested.includes(foreignCandidate.number))
+
+  const lateFields = {
+    title: "Sistema de ponto indisponível",
+    description: "O sistema de ponto não abre no meu computador.",
+    type: "INC" as const,
+    category: "SOFTWARE" as const,
+    impact: "PERSON_BLOCKED" as const,
+    urgency: "SAME_DAY" as const,
+  }
+  nextPlan = {
+    intent: "create",
+    fields: lateFields,
+    confidence: 0.95,
+    reason: "Pedido novo antes de outro chamado surgir.",
+  }
+  const lateId = await conversation()
+  const lateDraft = await service.send(
+    owner,
+    lateId,
+    request("Abra chamado para sistema de ponto indisponível")
+  )
+  assert.equal(lateDraft.drafts[0]!.operation, "CREATE")
+  await db.ticket.create({
+    data: {
+      title: lateFields.title,
+      description: lateFields.description,
+      type: lateFields.type,
+      category: lateFields.category,
+      priority: "HIGH",
+      openedById: owner,
+      affectedUserId: owner,
+      number: `INC-${randomUUID().slice(0, 8)}`,
+    },
+  })
+  const stopped = await service.send(owner, lateId, {
+    ...request("Confirmo o rascunho antigo"),
+    action: {
+      type: "confirm",
+      draftId: lateDraft.drafts[0]!.id,
+      version: lateDraft.drafts[0]!.version,
+    },
+  })
+  assert.equal(stopped.drafts[0]!.status, "EXPIRED")
+  assert.equal(
+    await db.ticket.count({
+      where: { openedById: owner, title: lateFields.title },
+    }),
+    1
+  )
+
+  nextPlan = {
+    intent: "create",
+    fields: proposedFields,
     confidence: 0.2,
     reason: "Intenção ambígua.",
   }
@@ -227,6 +469,19 @@ async function main() {
       .drafts.length,
     0
   )
+  nextPlan = {
+    intent: "create",
+    fields: { ...proposedFields, type: "REQ", impact: "TEAM_STOPPED" },
+    confidence: 0.95,
+    reason: "Combinação incompatível.",
+  }
+  const inconsistent = await service.send(
+    owner,
+    await conversation(),
+    request("Abra um pedido incompatível")
+  )
+  assert.equal(inconsistent.drafts.length, 0)
+  assert.match(inconsistent.messages.at(-1)!.content, /confirmar o tipo/i)
   nextPlan = {
     intent: "help",
     query: "zzzinexistentezz",
@@ -295,7 +550,7 @@ async function main() {
   )
   assert.equal((await service.snapshot(owner, changedId)).messageCount, 0)
   console.log(
-    "Núcleo do agente: fontes, intenções, confirmação CREATE/UPDATE, privacidade, concorrência, pausa, reenvio e falha: OK"
+    "Núcleo do agente: ajuda, consulta, duplicidade, confirmação CREATE/UPDATE/REOPEN, privacidade, concorrência, pausa e falha: OK"
   )
 }
 try {

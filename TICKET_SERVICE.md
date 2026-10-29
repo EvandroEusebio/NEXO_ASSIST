@@ -16,8 +16,10 @@ const detail = await tickets.get(employeeId, ticketNumber)
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `list(employeeId, filters?)`                        | Somente chamados abertos pelo funcionário; filtro opcional de estado, paginação `take` (1–100) e `skip`; mais recentes primeiro.                 |
 | `get(employeeId, number)`                           | Chamado e eventos; ausente ou de outro dono resulta no mesmo `NOT_FOUND`.                                                                        |
+| `findRelated(employeeId, problem)`                  | Procura problemas semelhantes somente entre chamados próprios ativos ou resolvidos nos últimos 7 dias.                                           |
 | `create(employeeId, input)`                         | Título, descrição, tipo, categoria, prioridade e pessoa afetada; número único com prefixo INC/REQ, estado OPEN e evento CREATED.                 |
 | `update(employeeId, number, patch)`                 | Altera conteúdo/classificação; rejeita patch vazio, campos desconhecidos, mudança de tipo e chamados resolvidos/encerrados.                      |
+| `reopen(employeeId, number, input)`                 | Reabre apenas chamados próprios resolvidos há até 7 dias; mantém o número, reinicia o prazo e grava `REOPENED`.                                  |
 | `transfer(employeeId, number, { reason, summary })` | Coloca chamado ativo em WAITING_ANALYST e guarda contexto em TRANSFERRED. Repetir a transferência de um chamado já na fila não duplica o evento. |
 
 O dono e a pessoa afetada precisam ser funcionários existentes. Ser a pessoa afetada não concede acesso ao chamado. O identificador do dono vem exclusivamente do backend; este módulo não autentica pedidos HTTP. Nenhuma operação é exposta diretamente ao browser ou registada como ferramenta do agente nesta etapa.
@@ -46,4 +48,4 @@ O teste cria utilizadores temporários e cobre consulta por funcionário (inclui
 
 ## Integração nas próximas etapas
 
-O login e as rotas HTTP de leitura da etapa 6 usam a sessão para fornecer o `employeeId` a este serviço; consulte `AUTH_DEMO.md`. Classificação automática e cálculo de prazos pertencem à etapa 9; este serviço recebe classificação explícita e não inventa prazos. Confirmação por rascunho, deduplicação e reabertura pertencem às etapas 10–11: `create` e `update` são primitivas internas e só devem ser chamadas pelo futuro fluxo de confirmação. A transferência aqui altera o chamado; a posse/pausa da conversa e o console do analista pertencem às etapas 12–13.
+O login e as rotas HTTP de leitura usam a sessão para fornecer o `employeeId` a este serviço; consulte `AUTH_DEMO.md`. O serviço recebe a prioridade validada pelo fluxo de conversa e calcula o prazo com o calendário de [CLASSIFICATION_SLA.md](CLASSIFICATION_SLA.md). Criação, complemento e reabertura usam a confirmação descrita em [TICKET_FLOW.md](TICKET_FLOW.md). A transferência aqui altera o chamado; a posse/pausa da conversa e o console do analista pertencem às etapas 12–13.

@@ -3,7 +3,8 @@ import { agentPlan } from "../../contracts/agent"
 
 // Tools produce proposals only. Authenticated application services execute them
 // after rechecking ownership, conversation revision and confirmation in PostgreSQL.
-const [help, tickets, create, update, handoff, clarify] = agentPlan.options
+const [help, tickets, create, update, reopen, handoff, clarify] =
+  agentPlan.options
 export const serviceDeskTools = {
   searchHelp: createTool({
     id: "search-help",
@@ -36,6 +37,14 @@ export const serviceDeskTools = {
     inputSchema: update.omit({ intent: true }),
     outputSchema: update,
     execute: async (input) => ({ intent: "update" as const, ...input }),
+  }),
+  proposeReopen: createTool({
+    id: "propose-reopen",
+    description:
+      "Propor reabertura de chamado resolvido quando o problema voltou. Exige número e relato novo; o backend verifica os 7 dias e pede confirmação antes de alterar.",
+    inputSchema: reopen.omit({ intent: true }),
+    outputSchema: reopen,
+    execute: async (input) => ({ intent: "reopen" as const, ...input }),
   }),
   requestAnalyst: createTool({
     id: "request-analyst",

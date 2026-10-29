@@ -2,6 +2,7 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getPrismaClient } from "../../../../src/lib/prisma"
 import { createTicketService } from "../../../../src/services/tickets"
+import { isOverdue } from "../../../../src/services/sla"
 import { currentEmployee } from "@/lib/auth"
 import { LogoutButton } from "./logout-button"
 import { Badge } from "@workspace/ui/components/badge"
@@ -70,9 +71,14 @@ export default async function TicketsPage() {
                     </span>
                     <Badge
                       variant="secondary"
-                      className="bg-[#f6f7f9] text-sm font-normal text-[#3d4656]"
+                      className={
+                        isOverdue(ticket)
+                          ? "bg-[#fff2df] text-sm font-medium text-[#8a5200]"
+                          : "bg-[#f6f7f9] text-sm font-normal text-[#3d4656]"
+                      }
                     >
                       {labels[ticket.status]}
+                      {isOverdue(ticket) ? " · prazo vencido" : ""}
                     </Badge>
                   </Link>
                 </li>

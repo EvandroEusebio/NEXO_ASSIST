@@ -8,6 +8,7 @@ import {
   TicketServiceError,
   type TicketErrorCode,
 } from "../src/services/tickets"
+import { responseDueAt } from "../src/services/sla"
 
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required")
 const makeClient = () =>
@@ -50,6 +51,16 @@ try {
   const ticket = await service.create(alice, input)
   assert.equal(ticket.title, "VPN indisponível")
   assert.equal(ticket.status, "OPEN")
+  await fails("CONFLICT", () =>
+    service.create(alice, {
+      ...input,
+      description: "A VPN continua indisponível.",
+    })
+  )
+  assert.equal(
+    ticket.nextResponseDueAt?.toISOString(),
+    responseDueAt("HIGH", ticket.createdAt).toISOString()
+  )
   assert.equal((await service.list(alice)).length, 1)
   assert.equal((await service.list(bob)).length, 0) // affected person is not the owner
   await fails("NOT_FOUND", () => service.get(bob, ticket.number))
@@ -143,6 +154,42 @@ try {
   assert.equal(
     (await createTicketService(db).get(alice, ticket.number)).description,
     edited.description
+  )
+  const reopenedService = createTicketService(db)
+  const second = await reopenedService.create(alice, {
+    ...input,
+    title: "Verificação de prazo",
+    priority: "LOW",
+  })
+  const reprioritized = await reopenedService.update(alice, second.number, {
+    priority: "HIGH",
+  })
+  assert.equal(
+    reprioritized.nextResponseDueAt?.toISOString(),
+    responseDueAt("HIGH", second.createdAt).toISOString()
+  )
+  const competing = {
+    ...input,
+    title: "Teclado sem resposta",
+    description: "O teclado deixou de responder.",
+  }
+  const attempts = await Promise.allSettled([
+    reopenedService.create(alice, competing),
+    reopenedService.create(alice, competing),
+  ])
+  assert.equal(
+    attempts.filter((result) => result.status === "fulfilled").length,
+    1
+  )
+  assert.equal(
+    attempts.filter((result) => result.status === "rejected").length,
+    1
+  )
+  assert.equal(
+    await db.ticket.count({
+      where: { openedById: alice, title: competing.title },
+    }),
+    1
   )
   console.log(
     "Ticket service checks passed: isolation, validation, writes, history, transfer, failures and persistence."

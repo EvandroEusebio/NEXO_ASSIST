@@ -54,9 +54,19 @@ const typeOptions = [
 const categoryOptions = Object.entries(categoryLabels).map(
   ([value, label]) => ({ value, label })
 )
-const priorityOptions = Object.entries(priorityLabels).map(
-  ([value, label]) => ({ value, label })
-)
+const impactOptions = [
+  { value: "TEAM_STOPPED", label: "Equipa ou empresa parada" },
+  { value: "PERSON_BLOCKED", label: "Uma pessoa impedida de trabalhar" },
+  {
+    value: "WORKAROUND_AVAILABLE",
+    label: "Problema com alternativa temporária",
+  },
+  { value: "ROUTINE_REQUEST", label: "Pedido ou melhoria sem bloqueio" },
+]
+const urgencyOptions = [
+  { value: "SAME_DAY", label: "Precisa de solução hoje" },
+  { value: "ROUTINE", label: "Sem prazo para hoje" },
+]
 type PendingRequest = {
   content: string
   action?: ChatAction
@@ -325,9 +335,9 @@ export function Chat({
       <Card className={styles.card}>
         <div className={styles.cardHeading}>
           <span>
-            {draft.operation === "UPDATE"
-              ? `Atualizar ${draft.targetTicket?.number}`
-              : "Novo chamado"}{" "}
+            {draft.operation === "CREATE"
+              ? "Novo chamado"
+              : `${draft.operation === "REOPEN" ? "Reabrir" : "Atualizar"} ${draft.targetTicket?.number}`}{" "}
             · Rascunho {draft.id.slice(0, 8)}
           </span>
           <Badge
@@ -361,7 +371,7 @@ export function Chat({
           <div className={styles.fact}>
             <dt className={styles.factLabel}>Afetados</dt>
             <dd className={styles.factValue}>
-              {draft.operation === "UPDATE"
+              {draft.operation !== "CREATE"
                 ? "Mantidos do chamado"
                 : "Somente você"}
             </dd>
@@ -375,9 +385,11 @@ export function Chat({
               disabled={disabled || !!human}
               onClick={() =>
                 void send(
-                  draft.operation === "UPDATE"
-                    ? "Confirmo a atualização deste chamado."
-                    : "Confirmo a criação deste chamado.",
+                  draft.operation === "CREATE"
+                    ? "Confirmo a criação deste chamado."
+                    : draft.operation === "REOPEN"
+                      ? "Confirmo a reabertura deste chamado."
+                      : "Confirmo a atualização deste chamado.",
                   {
                     type: "confirm",
                     draftId: draft.id,
@@ -510,7 +522,13 @@ export function Chat({
             variant="secondary"
             className={human ? styles.waitingBadge : styles.online}
           >
-            {human ? "● Aguardando atendimento" : "● Assistente online"}
+            {snapshot?.status === "CLOSED"
+              ? "● Atendimento encerrado"
+              : snapshot?.status === "ANALYST_ACTIVE"
+                ? "● Em atendimento com analista"
+                : human
+                  ? "● Aguardando atendimento"
+                  : "● Assistente online"}
           </Badge>
         </header>
         <div className={styles.scroll}>
@@ -576,36 +594,55 @@ export function Chat({
                   {meta?.kind === "welcome" && !human && quickOptions()}
                   {meta?.kind === "tickets" && (
                     <div className={styles.ticketList}>
-                      {snapshot.tickets.map((t) => (
-                        <Button
-                          variant="outline"
-                          className={styles.ticketButton}
-                          key={t.number}
-                          disabled={disabled || !!human}
-                          onClick={() =>
-                            void send(`${t.number} · ${t.title}`, {
-                              type: "ticket",
-                              number: t.number,
-                            })
-                          }
-                        >
-                          <span className={styles.radio} />
-                          <small className={styles.ticketMeta}>
-                            {t.number}
-                          </small>
-                          <strong className={styles.ticketTitle}>
-                            {t.title}
-                          </strong>
-                          <span className={styles.ticketMeta}>
-                            {statusLabels[t.status]}
-                          </span>
-                        </Button>
-                      ))}
+                      {snapshot.tickets
+                        .filter((t) =>
+                          meta.candidateNumbers
+                            ? meta.candidateNumbers.includes(t.number)
+                            : true
+                        )
+                        .map((t) => (
+                          <Button
+                            variant="outline"
+                            className={styles.ticketButton}
+                            key={t.number}
+                            disabled={disabled || !!human}
+                            onClick={() =>
+                              void send(`${t.number} · ${t.title}`, {
+                                type: "ticket",
+                                number: t.number,
+                              })
+                            }
+                          >
+                            <span className={styles.radio} />
+                            <small className={styles.ticketMeta}>
+                              {t.number}
+                            </small>
+                            <strong className={styles.ticketTitle}>
+                              {t.title}
+                            </strong>
+                            <span className={styles.ticketMeta}>
+                              {statusLabels[t.status]}
+                              {t.nextResponseDueAt &&
+                              !["RESOLVED", "CLOSED"].includes(t.status)
+                                ? ` · ${date(t.nextResponseDueAt)}${new Date(t.nextResponseDueAt).getTime() < Date.now() ? " · vencido" : ""}`
+                                : ""}
+                            </span>
+                          </Button>
+                        ))}
                     </div>
                   )}
                   {ticket && (
                     <>
                       <TicketCard ticket={ticket} />
+                      {ticket.status === "RESOLVED" &&
+                        ticket.resolvedAt &&
+                        Date.now() - new Date(ticket.resolvedAt).getTime() <=
+                          7 * 24 * 60 * 60 * 1000 && (
+                          <p className={styles.notice}>
+                            Se o problema voltou, descreva-o na conversa e peça
+                            para reabrir {ticket.number}.
+                          </p>
+                        )}
                       {!human && (
                         <div className={styles.options}>
                           <Button
@@ -615,7 +652,7 @@ export function Chat({
                             onClick={() =>
                               void send(
                                 `Quero falar com um analista sobre ${ticket.number}.`,
-                                { type: "handoff" }
+                                { type: "handoff", number: ticket.number }
                               )
                             }
                           >
@@ -631,8 +668,9 @@ export function Chat({
             })}
             {human && (
               <p className={styles.notice}>
-                A conversa está com o atendimento humano. As respostas
-                automáticas estão pausadas.
+                {snapshot?.status === "CLOSED"
+                  ? "Atendimento encerrado. Inicie uma nova conversa se precisar de ajuda."
+                  : "A conversa está com o atendimento humano. As respostas automáticas estão pausadas."}
               </p>
             )}
             {editor && (
@@ -785,11 +823,17 @@ function DraftEditor({
       title: String(data.get("title")),
       description: String(data.get("description")),
       type:
-        draft?.operation === "UPDATE"
+        draft && draft.operation !== "CREATE"
           ? draft.payload.type
           : (data.get("type") as "INC" | "REQ"),
       category: String(data.get("category")),
-      priority: String(data.get("priority")),
+      priority: draft?.payload.priority ?? "MEDIUM",
+      ...(draft?.operation === "UPDATE"
+        ? {}
+        : {
+            impact: String(data.get("impact")) as DraftFields["impact"],
+            urgency: String(data.get("urgency")) as DraftFields["urgency"],
+          }),
     })
   }
   return (
@@ -830,7 +874,7 @@ function DraftEditor({
             <Select
               items={typeOptions}
               name="type"
-              disabled={draft?.operation === "UPDATE"}
+              disabled={!!draft && draft.operation !== "CREATE"}
               defaultValue={draft?.payload.type ?? "INC"}
             >
               <SelectTrigger className={styles.editorControl} id="draft-type">
@@ -867,32 +911,62 @@ function DraftEditor({
               </SelectContent>
             </Select>
           </div>
-          <div className={styles.editorField}>
-            <Label htmlFor="draft-priority">Prioridade</Label>
-            <Select
-              items={priorityOptions}
-              name="priority"
-              defaultValue={draft?.payload.priority ?? "MEDIUM"}
-            >
-              <SelectTrigger
-                className={styles.editorControl}
-                id="draft-priority"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {priorityOptions.map(({ value, label }) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {(!draft || draft.operation === "CREATE") && (
+            <>
+              <div className={styles.editorField}>
+                <Label htmlFor="draft-impact">Impacto</Label>
+                <Select
+                  items={impactOptions}
+                  name="impact"
+                  required
+                  defaultValue={draft?.payload.impact}
+                >
+                  <SelectTrigger
+                    className={styles.editorControl}
+                    id="draft-impact"
+                  >
+                    <SelectValue placeholder="Selecione o impacto" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {impactOptions.map(({ value, label }) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className={styles.editorField}>
+                <Label htmlFor="draft-urgency">Urgência</Label>
+                <Select
+                  items={urgencyOptions}
+                  name="urgency"
+                  required
+                  defaultValue={draft?.payload.urgency}
+                >
+                  <SelectTrigger
+                    className={styles.editorControl}
+                    id="draft-urgency"
+                  >
+                    <SelectValue placeholder="Selecione a urgência" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {urgencyOptions.map(({ value, label }) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
         </div>
         <p className={styles.editorHint}>
           Pessoa afetada:{" "}
-          {draft?.operation === "UPDATE" ? "mantida do chamado" : "você"}
+          {draft && draft.operation !== "CREATE"
+            ? "mantida do chamado"
+            : "você"}
         </p>
         <div className={styles.options}>
           <Button type="submit" disabled={busy} className={styles.primary}>

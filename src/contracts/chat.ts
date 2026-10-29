@@ -27,12 +27,18 @@ export type DraftFields = {
   type: "INC" | "REQ"
   category: string
   priority: string
+  impact?:
+    | "TEAM_STOPPED"
+    | "PERSON_BLOCKED"
+    | "WORKAROUND_AVAILABLE"
+    | "ROUTINE_REQUEST"
+  urgency?: "SAME_DAY" | "ROUTINE"
 }
 export type ChatAction =
   | { type: "tickets" }
   | { type: "ticket"; number: string }
   | { type: "help" }
-  | { type: "handoff" }
+  | { type: "handoff"; number?: string }
   | { type: "draft"; fields: DraftFields; draftId?: string; version?: number }
   | { type: "confirm" | "cancel"; draftId: string; version: number }
 export type ChatTicket = {
@@ -45,6 +51,7 @@ export type ChatTicket = {
   createdAt: string
   updatedAt: string
   nextResponseDueAt: string | null
+  resolvedAt: string | null
 }
 export type ChatMessage = {
   id: string
@@ -56,6 +63,7 @@ export type ChatMessage = {
     number?: string
     draftId?: string
     activity?: string
+    candidateNumbers?: string[]
   } | null
 }
 export type ChatDraft = {

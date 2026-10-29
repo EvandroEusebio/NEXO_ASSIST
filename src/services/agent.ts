@@ -16,19 +16,17 @@ export const planWithNexo: AgentPlanner = async ({ content, history }) => {
     const model = nexoModel()
     const result = await nexoAgent.generate(
       [
-        ...history
-          .slice(-10)
-          .map((message) =>
-            message.author === "EMPLOYEE"
-              ? {
-                  role: "user" as const,
-                  content: message.content.slice(0, 800),
-                }
-              : {
-                  role: "assistant" as const,
-                  content: message.content.slice(0, 800),
-                }
-          ),
+        ...history.slice(-10).map((message) =>
+          message.author === "EMPLOYEE"
+            ? {
+                role: "user" as const,
+                content: message.content.slice(0, 800),
+              }
+            : {
+                role: "assistant" as const,
+                content: message.content.slice(0, 800),
+              }
+        ),
         { role: "user" as const, content },
       ],
       {

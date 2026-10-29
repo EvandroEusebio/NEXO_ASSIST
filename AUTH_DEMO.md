@@ -1,6 +1,6 @@
 # Fase 2, etapa 6 — login de demonstração
 
-O login aceita os cinco funcionários do seed com e-mail `@nexo.com.br` e qualquer senha **não vazia**. Analistas e utilizadores não marcados para demonstração não entram nesta área. A senha não é armazenada nem verificada; este fluxo existe apenas para a demonstração do desafio.
+O login aceita os cinco funcionários do seed com e-mail `@nexo.com.br` e qualquer senha **não vazia**. Os analistas Rafael Lima (`rafael.lima@nexo.com.br`) e Marta Alves (`marta.alves@nexo.com.br`) também podem entrar e são encaminhados para `/analyst`; funcionários seguem para `/chat`. Utilizadores não marcados para demonstração não entram. A senha não é armazenada nem verificada; este fluxo existe apenas para a demonstração do desafio.
 
 A sessão dura no máximo sete dias. Com “Manter conectado” desmarcado, o cookie dura apenas a sessão do navegador. O browser guarda um cookie HTTP-only, SameSite=Lax e Secure em produção. O PostgreSQL guarda apenas o hash SHA-256 do token aleatório. O logout remove a sessão do banco. As páginas e rotas de chamados obtêm o funcionário pela sessão; um chamado de outro funcionário devolve 404.
 
@@ -23,7 +23,7 @@ Abra `http://localhost:3000/login`. Use, por exemplo, `ana.souza@nexo.com.br` ou
 
 ## Verificar
 
-Inicie a aplicação na porta 3100 com `pnpm --filter web dev --port 3100` e execute `pnpm auth:check` noutro terminal. O teste HTTP verifica login de Ana e Bruno, rejeição de analista e e-mail desconhecido, sessões distintas, listas isoladas, 404 para acesso cruzado e revogação após logout. Também há `pnpm db:typecheck`, `pnpm --filter web lint` e `pnpm --filter web build`.
+Inicie a aplicação na porta 3100 com `pnpm --filter web dev --port 3100` e execute `pnpm auth:check` noutro terminal. O teste HTTP verifica login de Ana e Bruno, acesso do analista ao console, bloqueio entre perfis e rejeição de e-mail desconhecido, sessões distintas, listas isoladas, 404 para acesso cruzado e revogação após logout. Também há `pnpm db:typecheck`, `pnpm --filter web lint` e `pnpm --filter web build`.
 
 Rotas disponíveis: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/session`, `GET /api/tickets` e `GET /api/tickets/:number`. Criação e complemento estão disponíveis pelo rascunho confirmado do chat; reabertura será integrada nas próximas etapas. O agente está documentado em `AGENT_CORE.md`.
 

@@ -92,10 +92,13 @@ async function main() {
     description: "Chamado criado pelo teste e removido no fim.",
     type: "INC" as const,
     category: "HARDWARE",
-    priority: "MEDIUM",
+    priority: "HIGH", // forged client value; backend must derive MEDIUM
+    impact: "WORKAROUND_AVAILABLE" as const,
+    urgency: "ROUTINE" as const,
   }
   let result = await send({ type: "draft", fields })
   let draft = result.drafts[0]!
+  assert.equal(draft.payload.priority, "MEDIUM")
   assert.equal(await db.ticket.count({ where: { openedById: ownerId } }), 0)
   result = await send({
     type: "draft",
@@ -136,7 +139,14 @@ async function main() {
   )
   result = await send({ type: "ticket", number: saved.number })
   assert.equal(result.messages.at(-1)?.metadata?.number, saved.number)
-  result = await send({ type: "draft", fields })
+  result = await send({
+    type: "draft",
+    fields: {
+      ...fields,
+      title: "Impressora sem resposta",
+      description: "A impressora não responde mesmo após reinício.",
+    },
+  })
   const cancelled = result.drafts.find((d) => d.status === "PENDING")!
   await send({
     type: "cancel",

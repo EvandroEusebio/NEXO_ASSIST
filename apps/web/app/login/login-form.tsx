@@ -78,7 +78,8 @@ export function LoginForm() {
         setError(result.error ?? "Não foi possível iniciar sessão.")
         return
       }
-      router.replace("/chat")
+      const result = (await response.json()) as { user: { role: string } }
+      router.replace(result.user.role === "ANALYST" ? "/analyst" : "/chat")
       router.refresh()
     } catch {
       setError("Não foi possível ligar ao serviço. Tente novamente.")

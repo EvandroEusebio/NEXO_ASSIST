@@ -7,6 +7,13 @@ import {
   TicketStatus,
   TicketType,
 } from "../generated/prisma/enums"
+import { responseDueAt } from "./sla"
+import {
+  canReopen,
+  problemMatchScore,
+  REOPEN_WINDOW_MS,
+  type Problem,
+} from "./ticket-matching"
 
 export type TicketErrorCode =
   | "INVALID_INPUT"
@@ -148,7 +155,58 @@ export function createTicketService(
       )
   }
 
+  async function related(
+    tx: Transaction,
+    employeeId: string,
+    problem: Problem & { affectedUserId: string }
+  ) {
+    const recent = new Date(Date.now() - REOPEN_WINDOW_MS)
+    const candidates = await tx.ticket.findMany({
+      where: {
+        openedById: employeeId,
+        affectedUserId: problem.affectedUserId,
+        type: problem.type,
+        category: problem.category,
+        OR: [
+          {
+            status: {
+              in: ["OPEN", "IN_PROGRESS", "WAITING_ANALYST", "APPROVED"],
+            },
+          },
+          { status: "RESOLVED", resolvedAt: { gte: recent, lte: new Date() } },
+        ],
+      },
+      orderBy: { updatedAt: "desc" },
+    })
+    return candidates
+      .map((ticket) => ({ ticket, score: problemMatchScore(problem, ticket) }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score)
+  }
+
   return {
+    findRelated(
+      employeeId: string,
+      problem: Problem & { affectedUserId: string }
+    ) {
+      const data = parse(
+        fields.pick({
+          title: true,
+          description: true,
+          type: true,
+          category: true,
+          affectedUserId: true,
+        }),
+        {
+          title: problem.title,
+          description: problem.description,
+          type: problem.type,
+          category: problem.category,
+          affectedUserId: problem.affectedUserId,
+        }
+      )
+      return run(employeeId, (tx) => related(tx, employeeId, data))
+    },
     list(employeeId: string, input: TicketFilters = {}) {
       const query = parse(filters, input)
       return run(employeeId, (tx) =>
@@ -176,9 +234,19 @@ export function createTicketService(
       const data = parse(fields, input)
       return run(employeeId, async (tx) => {
         await affected(tx, data.affectedUserId)
+        // Serialize creations by the same employee, including across conversations.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${employeeId}))`
+        if ((await related(tx, employeeId, data)).length)
+          throw new TicketServiceError(
+            "CONFLICT",
+            "Já existe um chamado para este problema. Consulte-o antes de criar outro."
+          )
+        const now = new Date()
         return tx.ticket.create({
           data: {
             ...data,
+            createdAt: now,
+            nextResponseDueAt: responseDueAt(data.priority, now),
             openedById: employeeId,
             number: `${data.type}-${randomUUID().replaceAll("-", "").slice(0, 28)}`,
             events: {
@@ -205,15 +273,66 @@ export function createTicketService(
             "O tipo do chamado não pode ser alterado após a criação."
           )
         if (data.affectedUserId) await affected(tx, data.affectedUserId)
+        const nextResponseDueAt =
+          data.priority && data.priority !== ticket.priority
+            ? responseDueAt(
+                data.priority,
+                ticket.lastResponseAt ?? ticket.createdAt
+              )
+            : ticket.nextResponseDueAt
         return tx.ticket.update({
           where: { id: ticket.id },
           data: {
             ...data,
+            nextResponseDueAt,
             events: {
               create: {
                 actorId: employeeId,
                 action: "UPDATED",
                 metadata: data,
+              },
+            },
+          },
+        })
+      })
+    },
+    reopen(employeeId: string, number: string, input: CreateTicketInput) {
+      const reference = parse(text.max(32), number)
+      const data = parse(fields, input)
+      return run(employeeId, async (tx) => {
+        const ticket = await owned(tx, employeeId, reference)
+        const now = new Date()
+        if (!canReopen(ticket, now))
+          throw new TicketServiceError(
+            "INVALID_STATE",
+            "Este chamado não pode ser reaberto; o prazo de 7 dias terminou ou o estado mudou."
+          )
+        if (
+          data.type !== ticket.type ||
+          data.affectedUserId !== ticket.affectedUserId ||
+          data.priority !== ticket.priority
+        )
+          throw new TicketServiceError(
+            "INVALID_INPUT",
+            "A reabertura deve manter tipo, pessoa afetada e prioridade do chamado."
+          )
+        return tx.ticket.update({
+          where: { id: ticket.id },
+          data: {
+            title: data.title,
+            description: data.description,
+            category: data.category,
+            status: "OPEN",
+            resolvedAt: null,
+            nextResponseDueAt: responseDueAt(ticket.priority, now),
+            events: {
+              create: {
+                actorId: employeeId,
+                action: "REOPENED",
+                metadata: {
+                  previousStatus: ticket.status,
+                  resolvedAt: ticket.resolvedAt!.toISOString(),
+                },
               },
             },
           },

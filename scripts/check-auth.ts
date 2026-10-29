@@ -34,7 +34,25 @@ async function main() {
   })
   assert.equal((await request("/api/tickets")).status, 401)
   assert.equal((await request("/tickets")).status, 307)
-  assert.equal((await login("rafael.lima@nexo.com.br")).status, 401)
+  const analystLogin = await login("rafael.lima@nexo.com.br")
+  assert.equal(analystLogin.status, 200)
+  const analystHeaders = {
+    Cookie: analystLogin.headers.get("set-cookie")!.split(";")[0]!,
+  }
+  assert.equal(
+    (await request("/api/analyst/conversations", { headers: analystHeaders }))
+      .status,
+    200
+  )
+  assert.equal(
+    (await request("/api/tickets", { headers: analystHeaders })).status,
+    401
+  )
+  assert.equal(
+    (await request("/analyst", { headers: analystHeaders })).status,
+    200
+  )
+  await request("/api/auth/logout", { method: "POST", headers: analystHeaders })
   assert.equal((await login("desconhecido@nexo.com.br")).status, 401)
   assert.equal((await login("ana.souza@nexo.com.br", "")).status, 400)
   assert.equal(
@@ -70,6 +88,10 @@ async function main() {
 
   const asAna = { Cookie: anaCookie }
   const asBruno = { Cookie: brunoCookie }
+  assert.equal(
+    (await request("/api/analyst/conversations", { headers: asAna })).status,
+    403
+  )
   const anaSession = await request("/api/auth/session", { headers: asAna })
   assert.equal(anaSession.status, 200)
   assert.equal((await anaSession.json()).user.email, "ana.souza@nexo.com.br")

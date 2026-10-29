@@ -16,7 +16,7 @@ export type AuthUser = {
   id: string
   name: string
   email: string
-  role: "EMPLOYEE"
+  role: "EMPLOYEE" | "ANALYST"
 }
 
 export class AuthError extends Error {
@@ -38,7 +38,7 @@ function validToken(token: string | undefined): token is string {
   return typeof token === "string" && /^[a-f0-9]{64}$/.test(token)
 }
 
-/** Authentication for seeded employees only. Passwords are intentionally ignored in this demo. */
+/** Authentication for demo-enabled employees and analysts. Passwords are intentionally ignored in this demo. */
 export function createAuthService(db: PrismaClient) {
   return {
     async login(
@@ -60,7 +60,7 @@ export function createAuthService(db: PrismaClient) {
           demoLoginEnabled: true,
         },
       })
-      if (!user || user.role !== "EMPLOYEE" || !user.demoLoginEnabled)
+      if (!user || !user.demoLoginEnabled)
         throw new AuthError("INVALID_CREDENTIALS")
 
       const token = randomBytes(32).toString("hex")
@@ -78,7 +78,7 @@ export function createAuthService(db: PrismaClient) {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: "EMPLOYEE",
+          role: user.role,
         },
       }
     },
@@ -100,13 +100,12 @@ export function createAuthService(db: PrismaClient) {
         },
       })
       const user = session?.user
-      if (!user || user.role !== "EMPLOYEE" || !user.demoLoginEnabled)
-        return null
+      if (!user || !user.demoLoginEnabled) return null
       return {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: "EMPLOYEE",
+        role: user.role,
       }
     },
 

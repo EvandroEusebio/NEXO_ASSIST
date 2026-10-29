@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { impactSchema, urgencySchema } from "../services/ticket-rules"
 
 const explanation = {
   reason: z.string().trim().min(1).max(300),
@@ -17,6 +18,8 @@ export const proposedFields = z
       "EMAIL",
       "OTHER",
     ]),
+    impact: impactSchema,
+    urgency: urgencySchema,
   })
   .strict()
 
@@ -47,6 +50,14 @@ export const agentPlan = z.discriminatedUnion("intent", [
       intent: z.literal("update"),
       number: z.string().trim().min(1).max(32),
       addition: z.string().trim().min(1).max(4000),
+      ...explanation,
+    })
+    .strict(),
+  z
+    .object({
+      intent: z.literal("reopen"),
+      number: z.string().trim().min(1).max(32),
+      reasonToReopen: z.string().trim().min(1).max(4000),
       ...explanation,
     })
     .strict(),

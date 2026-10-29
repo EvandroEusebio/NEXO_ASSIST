@@ -5,6 +5,7 @@ import {
   createTicketService,
   TicketServiceError,
 } from "../../../../../src/services/tickets"
+import { isOverdue } from "../../../../../src/services/sla"
 import { currentEmployee } from "@/lib/auth"
 import { Card } from "@workspace/ui/components/card"
 import { Badge } from "@workspace/ui/components/badge"
@@ -40,6 +41,14 @@ export default async function TicketPage({
       notFound()
     throw error
   }
+  const overdue = isOverdue(ticket)
+  const deadline = ticket.nextResponseDueAt
+    ? new Intl.DateTimeFormat("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short",
+        timeZone: process.env.SLA_TIME_ZONE ?? "America/Sao_Paulo",
+      }).format(ticket.nextResponseDueAt)
+    : null
 
   return (
     <main className="min-h-screen bg-[#f6f7f9] px-6 py-12 text-[#1b2431]">
@@ -58,7 +67,16 @@ export default async function TicketPage({
           <div className="mt-4 flex flex-wrap gap-2">
             <Badge variant="secondary">{statusLabels[ticket.status]}</Badge>
             <Badge variant="outline">{priorityLabels[ticket.priority]}</Badge>
+            {overdue && (
+              <Badge className="bg-[#fff2df] text-[#8a5200]">
+                Prazo vencido
+              </Badge>
+            )}
           </div>
+          <p className="mt-3 text-sm text-[#5b6472]">
+            Próxima resposta: {deadline ?? "prazo não definido"}
+            {deadline ? " (horário do calendário de atendimento)" : ""}
+          </p>
           <p className="mt-8 leading-relaxed whitespace-pre-wrap text-[#3d4656]">
             {ticket.description}
           </p>

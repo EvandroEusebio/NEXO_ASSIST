@@ -19,11 +19,14 @@
     "db:seed:check": "tsx scripts/check-seed.ts",
     "db:smoke": "tsx scripts/db-smoke.ts",
     "tickets:check": "tsx scripts/check-tickets.ts",
+    "ticket-rules:check": "tsx scripts/check-ticket-rules.ts",
+    "ticket-matching:check": "tsx scripts/check-ticket-matching.ts",
     "auth:check": "tsx scripts/check-auth.ts",
     "chat:check": "tsx scripts/check-chat.ts",
     "chat:check:live": "tsx scripts/check-chat.ts --live",
     "agent:check": "tsx scripts/check-agent.ts",
-    "agent:check:live": "tsx scripts/check-agent.ts --live"
+    "agent:check:live": "tsx scripts/check-agent.ts --live",
+    "analyst:check": "tsx scripts/check-analyst.ts"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
