@@ -69,6 +69,7 @@ export function AnalystConsole({
 }) {
   const [queue, setQueue] = useState<AnalystConversation[]>([])
   const [selected, setSelected] = useState<string | null>(null)
+  const selection = useRef<string | null>(null)
   const [detail, setDetail] = useState<AnalystDetail | null>(null)
   const [search, setSearch] = useState("")
   const [filter, setFilter] = useState("all")
@@ -83,12 +84,16 @@ export function AnalystConsole({
   const [showTickets, setShowTickets] = useState(false)
   const [resolve, setResolve] = useState(false)
   const [ticketsHidden, setTicketsHidden] = useState(false)
+  const [transferring, setTransferring] = useState(false)
+  const [transferTo, setTransferTo] = useState<string | null>(null)
   const owned =
     detail?.status === "ANALYST_ACTIVE" && detail.assignedAnalystId === user.id
   const { connected, reportTyping, stopTyping } = useConversationActivity({
-    conversationId: selected,
+    conversationId: detail?.canReadMessages ? selected : null,
     latestMessageId:
-      detail?.id === selected ? detail.messages.at(-1)?.id : undefined,
+      detail?.id === selected && detail.canReadMessages
+        ? detail.messages.at(-1)?.id
+        : undefined,
     canType: owned,
     readSentinel: historyEnd,
   })
@@ -108,16 +113,64 @@ export function AnalystConsole({
           return
         }
         if (!response.ok) throw new Error("Não foi possível atualizar a fila.")
-        setQueue(await response.json())
+        const nextQueue = (await response.json()) as AnalystConversation[]
+        if (controller.signal.aborted) return
+        setQueue(nextQueue)
+        if (selection.current !== selected) return
+        const current = nextQueue.find((c) => c.id === selected)
+        if (
+          selected &&
+          current &&
+          !current.canReadMessages &&
+          ["ANALYST_ACTIVE", "CLOSED"].includes(current.status)
+        ) {
+          selection.current = null
+          setSelected(null)
+          setDetail(null)
+          setReply("")
+          setClosing(false)
+          setTransferring(false)
+          return
+        }
         if (selected) {
           const result = await fetch(`/api/analyst/conversations/${selected}`, {
             signal: controller.signal,
             cache: "no-store",
           })
+          if (controller.signal.aborted) return
+          if (result.status === 403 || result.status === 404) {
+            selection.current = null
+            setSelected(null)
+            setDetail(null)
+            setReply("")
+            setClosing(false)
+            setTransferring(false)
+            setQueue((previous) =>
+              previous.map((c) =>
+                c.id === selected
+                  ? {
+                      ...c,
+                      messages: [],
+                      drafts: [],
+                      canReadMessages: false,
+                      activity: {
+                        ...c.activity,
+                        unreadCount: 0,
+                        employee: { ...c.activity.employee, typing: false },
+                        employeeRead: null,
+                        analystRead: null,
+                      },
+                    }
+                  : c
+              )
+            )
+            return
+          }
           if (!result.ok)
             throw new Error("Não foi possível atualizar a conversa.")
           const next = (await result.json()) as AnalystDetail
-          if (controller.signal.aborted) return
+          if (controller.signal.aborted || selection.current !== selected)
+            return
           setDetail((previous) =>
             previous?.id === next.id && previous.revision > next.revision
               ? previous
@@ -141,13 +194,16 @@ export function AnalystConsole({
   useEffect(() => {
     if (nearBottom.current) historyEnd.current?.scrollIntoView({ block: "end" })
   }, [detail?.id, detail?.messages.length])
-  async function act(action: "claim" | "reply" | "return" | "close" | "start") {
+  async function act(
+    action: "claim" | "reply" | "return" | "close" | "start" | "transfer"
+  ) {
     if (!detail || lock.current) return
+    const requestedId = detail.id
     lock.current = true
     stopTyping()
     setBusy(true)
     setError("")
-    const key = JSON.stringify([detail.id, action, reply, resolve])
+    const key = JSON.stringify([detail.id, action, reply, resolve, transferTo])
     const requestId =
       retry.current?.key === key ? retry.current.id : crypto.randomUUID()
     retry.current = { key, id: requestId }
@@ -161,9 +217,11 @@ export function AnalystConsole({
           revision: detail.revision,
           ...(action === "reply" ? { content: reply } : {}),
           ...(action === "close" ? { resolveTicket: resolve } : {}),
+          ...(action === "transfer" ? { toAnalystId: transferTo } : {}),
         }),
       })
       const result = await response.json()
+      if (selection.current !== requestedId) return
       if (!response.ok) {
         if (response.status < 500) retry.current = null
         throw new Error(result.error)
@@ -171,11 +229,35 @@ export function AnalystConsole({
       retry.current = null
       if (action === "start") {
         nearBottom.current = true
+        selection.current = result.id
         setSelected(result.id)
         setFilter("all")
         setReply("")
       }
-      setDetail(result)
+      if (action === "transfer") {
+        selection.current = null
+        setSelected(null)
+        setDetail(null)
+        setReply("")
+        setTransferring(false)
+        setTransferTo(null)
+        setQueue((previous) =>
+          previous.map((c) =>
+            c.id === result.id
+              ? {
+                  ...c,
+                  status: result.status,
+                  assignedAnalystId: result.assignedAnalystId,
+                  assignedAnalyst: result.assignedAnalyst,
+                  messages: [],
+                  drafts: [],
+                  canReadMessages: false,
+                  activity: result.activity,
+                }
+              : c
+          )
+        )
+      } else setDetail(result)
       setClosing(false)
       setResolve(false)
       if (action === "reply") setReply("")
@@ -192,9 +274,13 @@ export function AnalystConsole({
   const linked = detail?.tickets.find(
     (t) => t.number === detail.handoff?.number
   )
-  const visible = groupAnalystQueue(queue, user.id, filter, search)
+  const visible = groupAnalystQueue(queue, user.id, filter, search, selected)
   const unreadTotal = queue.reduce(
-    (total, c) => total + c.activity.unreadCount,
+    (total, c) =>
+      total +
+      (c.status === "ANALYST_ACTIVE" && c.assignedAnalystId === user.id
+        ? c.activity.unreadCount
+        : 0),
     0
   )
   const counts = {
@@ -209,6 +295,7 @@ export function AnalystConsole({
   function selectThread(id: string) {
     stopTyping()
     nearBottom.current = true
+    selection.current = id
     setSelected(id)
     setDetail(null)
     setReply("")
@@ -247,6 +334,7 @@ export function AnalystConsole({
           onClick={() => {
             if (!busy) {
               stopTyping()
+              selection.current = null
               setSelected(null)
               setDetail(null)
             }
@@ -279,7 +367,7 @@ export function AnalystConsole({
         </div>
       </nav>
       <aside
-        className={`${selected ? "hidden md:flex" : "flex"} min-w-0 flex-1 flex-col border-r border-[#e8ebef] md:w-80 md:flex-none xl:w-[380px]`}
+        className={`${selected ? "hidden md:flex" : "flex"} min-w-0 flex-1 flex-col border-r border-[#e8ebef] md:w-80 md:flex-none xl:w-95`}
       >
         {error && !selected && (
           <p role="alert" className="bg-red-50 p-3 text-sm text-red-700">
@@ -374,7 +462,12 @@ export function AnalystConsole({
                         </span>
                         <p className="min-w-0 flex-1 truncate text-xs text-slate-500">
                           {latest?.author === "AGENT" ? "Nexo: " : ""}
-                          {latest?.content ?? "Nova conversa"}
+                          {latest?.content ??
+                            (c.status === "WAITING_ANALYST"
+                              ? "Histórico disponível após assumir"
+                              : c.status === "ANALYST_ACTIVE"
+                                ? `Atendimento com ${c.assignedAnalyst?.name ?? "outro analista"}`
+                                : (labels[c.status] ?? "Nova conversa"))}
                         </p>
                       </>
                     )}
@@ -428,6 +521,7 @@ export function AnalystConsole({
                   aria-label="Voltar à fila"
                   onClick={() => {
                     stopTyping()
+                    selection.current = null
                     setSelected(null)
                     setDetail(null)
                   }}
@@ -475,7 +569,12 @@ export function AnalystConsole({
                   <Button
                     variant="ghost"
                     disabled={busy}
-                    //onClick={() => setShowTickets(true)}
+                    aria-label="Transferir atendimento"
+                    title="Transferir atendimento"
+                    onClick={() => {
+                      setTransferTo(null)
+                      setTransferring(true)
+                    }}
                   >
                     <EllipsisVertical size={20} />
                   </Button>
@@ -491,6 +590,16 @@ export function AnalystConsole({
                   el.scrollHeight - el.scrollTop - el.clientHeight < 100
               }}
             >
+              {!detail.canReadMessages && (
+                <p
+                  className="rounded-xl bg-white p-4 text-sm text-slate-500"
+                  role="status"
+                >
+                  {waiting
+                    ? "Assuma o atendimento para consultar o histórico de mensagens."
+                    : "O histórico fica disponível ao analista responsável após assumir o atendimento."}
+                </p>
+              )}
               {detail.handoff && (
                 <details className="rounded-lg border border-slate-200 bg-white/70 p-3 text-xs text-slate-600">
                   <summary className="cursor-pointer font-medium">
@@ -550,7 +659,7 @@ export function AnalystConsole({
                         <div
                           className={`rounded-xl px-3 py-2 text-sm shadow-[0_1px_2px_#1c263308] ${m.author === "EMPLOYEE" ? "rounded-tl-sm bg-white" : m.author === "ANALYST" ? "rounded-tr-sm bg-[#e1f3e9]" : "rounded-tr-sm bg-[#e5effb]"}`}
                         >
-                          <p className="[overflow-wrap:anywhere] whitespace-pre-wrap">
+                          <p className="[overflow-wrap-anywhere] whitespace-pre-wrap">
                             {m.content}
                           </p>
                           <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-500">
@@ -663,7 +772,7 @@ export function AnalystConsole({
           </>
         )}
       </section>
-      {detail && !ticketsHidden && (
+      {detail?.canReadMessages && !ticketsHidden && (
         <AnalystTickets
           key={detail.employee.id}
           detail={detail}
@@ -674,6 +783,53 @@ export function AnalystConsole({
           }}
         />
       )}
+      <Dialog
+        open={transferring && owned}
+        onOpenChange={(value) => {
+          if (!busy) setTransferring(value)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Transferir atendimento</DialogTitle>
+            <DialogDescription>
+              O novo responsável recebe o histórico. As mensagens anteriores não
+              entram no seu contador de não lidas.
+            </DialogDescription>
+          </DialogHeader>
+          <Select
+            value={transferTo}
+            onValueChange={setTransferTo}
+            disabled={busy}
+            items={(detail?.availableAnalysts ?? []).map((analyst) => ({
+              value: analyst.id,
+              label: analyst.name,
+            }))}
+          >
+            <SelectTrigger aria-label="Novo analista responsável">
+              <SelectValue placeholder="Selecione um analista" />
+            </SelectTrigger>
+            <SelectContent>
+              {detail?.availableAnalysts.map((analyst) => (
+                <SelectItem key={analyst.id} value={analyst.id}>
+                  {analyst.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {!detail?.availableAnalysts.length && (
+            <p className="text-sm text-slate-500">
+              Não há outro analista disponível.
+            </p>
+          )}
+          <Button
+            disabled={busy || !transferTo}
+            onClick={() => void act("transfer")}
+          >
+            {busy ? "A transferir…" : "Confirmar transferência"}
+          </Button>
+        </DialogContent>
+      </Dialog>
       <Dialog open={closing} onOpenChange={setClosing}>
         <DialogContent>
           <DialogHeader>

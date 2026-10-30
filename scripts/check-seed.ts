@@ -10,6 +10,7 @@ const demoEmails = [
   "elisa.prado@nexo.com.br",
   "rafael.lima@nexo.com.br",
   "marta.alves@nexo.com.br",
+  "joao.santos@nexo.com.br",
 ]
 const articleIds = Array.from(
   { length: 8 },
@@ -50,7 +51,9 @@ async function main() {
 
     if (
       employeeCount !== 5 ||
-      analystCount !== 2 ||
+      analystCount !== 3 ||
+      users.filter((user) => user.demoLoginEnabled && user.passwordHash)
+        .length !== 6 ||
       articles.length !== 8 ||
       tickets.length !== 9 ||
       !ana ||
@@ -78,7 +81,7 @@ async function main() {
     }
 
     console.log(
-      "Seed verificado: 5 funcionários, 2 analistas, 8 artigos e 9 chamados; cenários de atraso, reabertura e isolamento presentes."
+      "Seed verificado: 5 funcionários (3 com acesso), 3 analistas, 8 artigos e 9 chamados; cenários de atraso, reabertura e isolamento presentes."
     )
   } finally {
     await prisma.$disconnect()

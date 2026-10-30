@@ -1,3 +1,4 @@
+import { hashPassword } from "../src/lib/password"
 import "dotenv/config"
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
@@ -64,6 +65,7 @@ async function main() {
             email: `decision-${randomUUID()}@nexo.com.br`,
             role,
             demoLoginEnabled: true,
+            passwordHash: await hashPassword("Decisions-check-password-2026!"),
           },
         })
       ).id
@@ -99,10 +101,7 @@ async function main() {
     JSON.stringify(snapshot),
     /private-provider-id|inputTokens|sourceIds/
   )
-  assert.deepEqual(
-    (await analysts.detail(analyst, cid)).messages.at(-1)?.decision,
-    message.decision
-  )
+  assert.deepEqual((await analysts.detail(analyst, cid)).messages, [])
   await assert.rejects(service.snapshot(other, cid), { status: 404 })
   await assert.rejects(analysts.detail(owner, cid), { status: 403 })
 
@@ -174,6 +173,10 @@ async function main() {
     requestId: randomUUID(),
     revision: detail.revision,
   })
+  assert.deepEqual(
+    detail.messages.find((m) => m.id === message.id)?.decision,
+    message.decision
+  )
   detail = await analysts.act(analyst, cid, {
     action: "reply",
     content: "Vou verificar.",
@@ -223,7 +226,10 @@ async function main() {
       const response = await fetch(`${base}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: user.email, password: "demo" }),
+        body: JSON.stringify({
+          email: user.email,
+          password: "Decisions-check-password-2026!",
+        }),
       })
       assert.equal(response.status, 200)
       cookies.push(response.headers.get("set-cookie")!.split(";")[0]!)

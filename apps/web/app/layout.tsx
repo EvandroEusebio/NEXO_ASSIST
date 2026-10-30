@@ -34,7 +34,8 @@ export default function RootLayout({
         geist.variable
       )}
     >
-      <body>
+      {/* Extensions can inject attributes on body before React hydrates. */}
+      <body suppressHydrationWarning>
         <ThemeProvider forcedTheme="light">
           <ApplicationPresence />
           {children}

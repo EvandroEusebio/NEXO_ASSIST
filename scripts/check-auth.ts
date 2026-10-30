@@ -1,3 +1,5 @@
+import "dotenv/config"
+import { demoAccounts, initialPassword } from "../prisma/seed-users"
 import assert from "node:assert/strict"
 
 const baseUrl = process.env.AUTH_CHECK_URL ?? "http://localhost:3100"
@@ -6,7 +8,14 @@ async function request(path: string, init: RequestInit = {}) {
   return fetch(new URL(path, baseUrl), { redirect: "manual", ...init })
 }
 
-async function login(email: string, password = "senha-de-demonstracao") {
+async function login(
+  email: string,
+  password = process.env.AUTH_CHECK_PASSWORD ||
+    initialPassword(
+      demoAccounts.find((account) => account.email === email.toLowerCase()) ??
+        demoAccounts[0]
+    )
+) {
   return request("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -15,12 +24,28 @@ async function login(email: string, password = "senha-de-demonstracao") {
 }
 
 async function main() {
+  assert.equal(
+    (await login("ana.souza@nexo.com.br", "senha-errada")).status,
+    401
+  )
+  for (const account of demoAccounts) {
+    const response = await login(account.email)
+    assert.equal(response.status, 200, account.email)
+    const user = (await response.json()).user
+    assert.equal(user.role, account.role)
+    assert.ok(!JSON.stringify(user).includes("password"))
+    await request("/api/auth/logout", {
+      method: "POST",
+      headers: { Cookie: response.headers.get("set-cookie")!.split(";")[0]! },
+    })
+  }
   const temporaryLogin = await request("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       email: "ana.souza@nexo.com.br",
-      password: "demo",
+      password:
+        process.env.AUTH_CHECK_PASSWORD || initialPassword(demoAccounts[0]),
       rememberMe: false,
     }),
   })

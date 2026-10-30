@@ -37,8 +37,8 @@ export function LoginNotice({ kind }: { kind: "password" | "privacy" }) {
           </DialogTitle>
           <DialogDescription>
             {isPassword
-              ? "Nesta demonstração, use o e-mail de um funcionário dos dados de exemplo e qualquer senha não vazia. Não é necessário redefinir a senha."
-              : "Esta demonstração usa funcionários e chamados de exemplo. A senha informada não é armazenada. Um cookie mantém a sua sessão e permite consultar os chamados da conta escolhida. Ao sair, a sessão é revogada."}
+              ? "Entre com o e-mail e a senha da sua conta. Para alterar a senha, aceda a Meu perfil depois de entrar. Se perdeu o acesso, contacte a TI pelo ramal 4000."
+              : "A sua senha é verificada com um hash seguro. O texto original não é guardado. Um cookie protege a sessão e permite consultar apenas os chamados da sua conta. Ao sair, a sessão é revogada."}
           </DialogDescription>
         </DialogHeader>
         {isPassword && (

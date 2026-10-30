@@ -1,3 +1,4 @@
+import { hashPassword } from "../src/lib/password"
 import "dotenv/config"
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
@@ -28,11 +29,17 @@ async function main() {
         email: `activity-${randomUUID()}@nexo.com.br`,
         role,
         demoLoginEnabled: true,
+        passwordHash: await hashPassword("Activity-check-password-2026!"),
       },
     })
     users.push(user.id)
     sessions.push(
-      (await auth.login({ email: user.email, password: "demo" })).token
+      (
+        await auth.login({
+          email: user.email,
+          password: "Activity-check-password-2026!",
+        })
+      ).token
     )
   }
   const [employee, other, analyst, second] = users as [
@@ -48,7 +55,7 @@ async function main() {
     requestId: randomUUID(),
     action: { type: "handoff" },
   })
-  const message = sent.messages.find((m) => m.author === "EMPLOYEE")!
+  let message = sent.messages.find((m) => m.author === "EMPLOYEE")!
   const signal = async (
     viewer = analyst,
     role: "EMPLOYEE" | "ANALYST" = "ANALYST"
@@ -69,11 +76,12 @@ async function main() {
       conversationId: cid,
       ...overrides,
     })
-  assert.equal((await signal()).unreadCount, 1)
+  assert.equal((await signal()).unreadCount, 0)
   assert.equal((await signal()).employee.online, false)
   await pulse(0, 1, { typing: true })
   assert.equal((await signal()).employee.online, true)
-  assert.equal((await signal()).employee.typing, true)
+  assert.equal((await signal()).employee.typing, false)
+  assert.equal((await signal(employee, "EMPLOYEE")).employee.typing, true)
   await assert.rejects(pulse(1, 1), { status: 404 })
   await assert.rejects(pulse(2, 1, { typing: true }), { status: 403 })
   await assert.rejects(activity.heartbeat(undefined, {}), { status: 401 })
@@ -97,6 +105,23 @@ async function main() {
   )
   at = new Date(at.getTime() + PRESENCE_TTL_MS + 1)
   assert.equal((await signal()).employee.online, false)
+  let detail = await analysts.detail(analyst, cid)
+  detail = await analysts.act(analyst, cid, {
+    action: "claim",
+    requestId: randomUUID(),
+    revision: detail.revision,
+  })
+  assert.equal(
+    (await signal()).unreadCount,
+    0,
+    "Assignment history starts without unread messages"
+  )
+  const incoming = await conversations.send(employee, cid, {
+    content: "Mensagem após assumir",
+    requestId: randomUUID(),
+  })
+  message = incoming.messages.at(-1)!
+  assert.equal((await signal()).unreadCount, 1)
   const revision = (
     await db.conversation.findUniqueOrThrow({ where: { id: cid } })
   ).revision
@@ -104,9 +129,12 @@ async function main() {
   assert.equal((await signal()).unreadCount, 0)
   assert.equal(
     (await signal(second)).unreadCount,
-    1,
-    "Readers have independent counts"
+    0,
+    "Other analysts do not receive unread counts"
   )
+  await assert.rejects(pulse(3, 1, { readThrough: message.id }), {
+    status: 403,
+  })
   assert.equal(
     (await db.conversation.findUniqueOrThrow({ where: { id: cid } })).revision,
     revision,
@@ -131,12 +159,7 @@ async function main() {
     pulse(2, 6, { readThrough: otherConversation.messages[0]!.id }),
     { status: 400 }
   )
-  let detail = await analysts.detail(analyst, cid)
-  detail = await analysts.act(analyst, cid, {
-    action: "claim",
-    requestId: randomUUID(),
-    revision: detail.revision,
-  })
+  detail = await analysts.detail(analyst, cid)
   await pulse(2, 7, { typing: true })
   assert.equal((await signal(employee, "EMPLOYEE")).analyst.typing, true)
   await assert.rejects(pulse(3, 1, { typing: true }), { status: 403 })

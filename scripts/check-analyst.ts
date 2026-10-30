@@ -55,8 +55,10 @@ async function main() {
   })
   assert.equal(state.status, "WAITING_ANALYST")
   let detail = await analysts.detail(first, id)
-  assert.match(detail.handoff!.summary!, /Preciso de uma pessoa/)
-  assert.equal(detail.handoff?.number, ticket.number)
+  assert.equal(detail.canReadMessages, false)
+  assert.deepEqual(detail.messages, [])
+  assert.equal(detail.handoff, null)
+  assert.deepEqual(detail.tickets, [])
   await assert.rejects(analysts.list(employee), { status: 403 })
   const otherThread = randomUUID()
   await conversations.create(employee, { id: otherThread })
@@ -107,9 +109,14 @@ async function main() {
     )
   )
   assert.equal(race.filter((r) => r.status === "fulfilled").length, 1)
-  detail = await analysts.detail(first, id)
+  const claimed = race.find((result) => result.status === "fulfilled")!
+  if (claimed.status !== "fulfilled") throw new Error("Nenhum analista assumiu")
+  detail = claimed.value
+  assert.match(detail.handoff!.summary!, /Preciso de uma pessoa/)
+  assert.equal(detail.handoff?.number, ticket.number)
   const owner = detail.assignedAnalystId!
   const other = owner === first ? second : first
+  await assert.rejects(analysts.detail(other, id), { status: 403 })
   for (const action of ["reply", "return", "close"])
     await assert.rejects(
       analysts.act(other, id, {
@@ -233,7 +240,7 @@ async function main() {
       requestId: randomUUID(),
       revision: closedSource.revision,
     }),
-    { status: 409 }
+    { status: 403 }
   )
   const employeeView = await conversations.snapshot(employee, reopened.id)
   assert.equal(
@@ -313,7 +320,14 @@ async function main() {
         : {}),
     })
     assert.equal(state.status, "WAITING_ANALYST", reason)
-    assert.equal((await analysts.detail(first, cid)).handoff?.reason, reason)
+    const recorded = await db.message.findFirstOrThrow({
+      where: {
+        conversationId: cid,
+        metadata: { path: ["kind"], equals: "handoff" },
+      },
+      orderBy: { createdAt: "desc" },
+    })
+    assert.equal((recorded.metadata as { reason: string }).reason, reason)
   }
   // A model answer started before a handoff must never overwrite human state.
   const racingId = randomUUID()

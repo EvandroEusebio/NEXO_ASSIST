@@ -1,19 +1,13 @@
 import "dotenv/config"
+import { seedUsers } from "./seed-users"
 import { createPrismaClient } from "../src/lib/prisma"
 import type {
   TicketCategory,
   TicketPriority,
   TicketStatus,
   TicketType,
-  UserRole,
 } from "../src/generated/prisma/client"
 
-type SeedUser = {
-  name: string
-  email: string
-  role: UserRole
-  demoLoginEnabled: boolean
-}
 type SeedArticle = {
   id: string
   title: string
@@ -39,51 +33,6 @@ type SeedTicket = {
 const now = new Date()
 const hoursFromNow = (hours: number) =>
   new Date(now.getTime() + hours * 60 * 60 * 1000)
-
-const users: SeedUser[] = [
-  {
-    name: "Ana Souza",
-    email: "ana.souza@nexo.com.br",
-    role: "EMPLOYEE",
-    demoLoginEnabled: true,
-  },
-  {
-    name: "Bruno Tavares",
-    email: "bruno.tavares@nexo.com.br",
-    role: "EMPLOYEE",
-    demoLoginEnabled: true,
-  },
-  {
-    name: "Carla Mendes",
-    email: "carla.mendes@nexo.com.br",
-    role: "EMPLOYEE",
-    demoLoginEnabled: true,
-  },
-  {
-    name: "Diego Ramos",
-    email: "diego.ramos@nexo.com.br",
-    role: "EMPLOYEE",
-    demoLoginEnabled: true,
-  },
-  {
-    name: "Elisa Prado",
-    email: "elisa.prado@nexo.com.br",
-    role: "EMPLOYEE",
-    demoLoginEnabled: true,
-  },
-  {
-    name: "Rafael Lima",
-    email: "rafael.lima@nexo.com.br",
-    role: "ANALYST",
-    demoLoginEnabled: true,
-  },
-  {
-    name: "Marta Alves",
-    email: "marta.alves@nexo.com.br",
-    role: "ANALYST",
-    demoLoginEnabled: true,
-  },
-]
 
 // IDs estáveis permitem repetir o seed sem exigir uma migração para acrescentar slug.
 const articles: SeedArticle[] = [
@@ -286,22 +235,8 @@ const tickets: SeedTicket[] = [
 async function main() {
   const prisma = createPrismaClient()
   try {
+    const userIds = await seedUsers(prisma)
     await prisma.$transaction(async (tx) => {
-      const userIds = new Map<string, string>()
-
-      for (const user of users) {
-        const saved = await tx.user.upsert({
-          where: { email: user.email },
-          create: user,
-          update: {
-            name: user.name,
-            role: user.role,
-            demoLoginEnabled: user.demoLoginEnabled,
-          },
-        })
-        userIds.set(user.email, saved.id)
-      }
-
       for (const article of articles) {
         await tx.helpArticle.upsert({
           where: { id: article.id },
@@ -334,7 +269,7 @@ async function main() {
     })
 
     console.log(
-      `Seed concluído: ${users.length} utilizadores, ${articles.length} artigos e ${tickets.length} chamados de demonstração.`
+      `Seed concluído: ${userIds.size} utilizadores, ${articles.length} artigos e ${tickets.length} chamados de demonstração.`
     )
   } finally {
     await prisma.$disconnect()

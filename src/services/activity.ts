@@ -1,3 +1,4 @@
+import { canReadAnalystMessages } from "./analyst-access"
 import { createHash } from "node:crypto"
 import { z } from "zod"
 import { Prisma, type PrismaClient } from "../generated/prisma/client"
@@ -56,6 +57,8 @@ export function createActivityService(
           throw new ActivityError(401, "Entre novamente.")
         const user = session.user
         if (data.conversationId) {
+          if (user.role === "ANALYST")
+            await tx.$queryRaw`SELECT id FROM "Conversation" WHERE id = ${data.conversationId}::uuid FOR UPDATE`
           const conversation = await tx.conversation.findUnique({
             where: { id: data.conversationId },
           })
@@ -64,6 +67,14 @@ export function createActivityService(
             (user.role === "EMPLOYEE" && conversation.employeeId !== user.id)
           )
             throw new ActivityError(404, "Conversa não encontrada.")
+          if (
+            user.role === "ANALYST" &&
+            !canReadAnalystMessages(conversation, user.id)
+          )
+            throw new ActivityError(
+              403,
+              "Este atendimento pertence a outro analista."
+            )
           if (
             data.typing &&
             (conversation.status === "CLOSED" ||
@@ -154,14 +165,30 @@ export async function conversationActivity(
     include: { user: { select: { role: true } } },
     orderBy: [{ lastReadAt: "asc" }, { lastReadMessageId: "asc" }],
   })
+  const assignmentJoin =
+    role === "ANALYST"
+      ? Prisma.sql`
+    LEFT JOIN LATERAL (
+      SELECT a."createdAt", a."id", a."authorUserId", a."metadata"
+      FROM "Message" a WHERE a."conversationId" = c."id"
+        AND a."metadata"->>'kind' = 'analyst-action'
+        AND a."metadata"->>'action' IN ('claim', 'transfer', 'start')
+      ORDER BY a."createdAt" DESC, a."id" DESC LIMIT 1
+    ) assignment ON TRUE`
+      : Prisma.empty
   const incoming =
     role === "ANALYST"
-      ? Prisma.sql`m."author" = 'EMPLOYEE'`
+      ? Prisma.sql`
+    m."author" = 'EMPLOYEE' AND c."status" = 'ANALYST_ACTIVE' AND c."assignedAnalystId" = ${viewerId}::uuid
+    AND COALESCE(assignment."metadata"->>'toAnalystId', assignment."authorUserId"::text) = ${viewerId}
+    AND (m."createdAt", m."id") > (assignment."createdAt", assignment."id")`
       : Prisma.sql`m."author" IN ('AGENT', 'ANALYST')`
   const counts = await db.$queryRaw<
     { conversationId: string; count: number }[]
   >(Prisma.sql`
     SELECT m."conversationId", COUNT(*)::int AS count FROM "Message" m
+    JOIN "Conversation" c ON c.id = m."conversationId"
+    ${assignmentJoin}
     LEFT JOIN "ConversationReadState" r ON r."conversationId" = m."conversationId" AND r."userId" = ${viewerId}::uuid
     WHERE m."conversationId" IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))}) AND ${incoming}
       AND (r."userId" IS NULL OR (m."createdAt", m."id") > (r."lastReadAt", r."lastReadMessageId"))
@@ -190,15 +217,22 @@ export async function conversationActivity(
           }
         : null
     const ownReads = reads.filter((r) => r.conversationId === c.id)
+    const canRead = role === "EMPLOYEE" || canReadAnalystMessages(c, viewerId)
     result.set(c.id, {
-      employee: status(c.employeeId, c.status !== "CLOSED"),
+      employee: status(c.employeeId, canRead && c.status !== "CLOSED"),
       analyst: status(c.assignedAnalystId, c.status === "ANALYST_ACTIVE"),
       unreadCount:
         counts.find((count) => count.conversationId === c.id)?.count ?? 0,
-      employeeRead: cursor(ownReads.find((r) => r.userId === c.employeeId)),
-      analystRead: cursor(
-        ownReads.filter((r) => r.user.role === "ANALYST").at(-1)
-      ),
+      employeeRead: canRead
+        ? cursor(ownReads.find((r) => r.userId === c.employeeId))
+        : null,
+      analystRead: canRead
+        ? cursor(
+            role === "EMPLOYEE"
+              ? ownReads.filter((r) => r.user.role === "ANALYST").at(-1)
+              : ownReads.find((r) => r.userId === viewerId)
+          )
+        : null,
     })
   }
   return result

@@ -1,3 +1,4 @@
+import { hashPassword } from "../src/lib/password"
 import "dotenv/config"
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
@@ -39,12 +40,13 @@ async function main() {
         name: `Chat check ${index}`,
         email: `chat-${run}-${index}@nexo.com.br`,
         demoLoginEnabled: true,
+        passwordHash: await hashPassword("Chat-check-password-2026!"),
       },
     })
     users.push(user.id)
     const response = await request("/api/auth/login", undefined, {
       email: user.email,
-      password: "demo",
+      password: "Chat-check-password-2026!",
     })
     assert.equal(response.status, 200)
     const cookie = response.headers.get("set-cookie")?.split(";")[0]

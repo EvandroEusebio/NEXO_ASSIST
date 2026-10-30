@@ -23,3 +23,7 @@ As relações e índices permitem consultar conversas por funcionário, a fila d
 3. Executar `pnpm db:smoke`. O script grava uma conversa e uma decisão, fecha a ligação, relê os dados com outra ligação e remove os dados temporários.
 
 O esquema define a estrutura. A etapa 6 acrescentou autenticação e autorização de leitura por sessão. As próximas etapas implementarão transições válidas de estado, cálculo de SLA, validação do rascunho e confirmação antes de alterar chamados. Essas regras pertencem aos serviços da aplicação e não devem depender apenas do agente de IA.
+
+## Autenticação com senha
+
+`User.passwordHash` guarda o hash scrypt com salt; `passwordChangedAt` regista a alteração real. Ambos são opcionais para manter os utilizadores históricos sem acesso. Só contas habilitadas e com hash entram. `AuthSession.rememberMe` permite preservar a duração do cookie quando a sessão é renovada após uma troca de senha. A migração `20261030190000_password_auth` encerra sessões anteriores à validação por senha.

@@ -34,11 +34,16 @@ import {
   type ChatAction,
   type ChatDraft,
   type ChatSnapshot,
-  type ChatTicket,
   type ConversationSummary,
   type DraftFields,
 } from "../../../../src/contracts/chat"
 import { styles } from "./styles"
+import {
+  TicketCard,
+  TicketChoices,
+  ticketAge,
+  ticketOverdue,
+} from "./ticket-components"
 
 type User = { name: string; email: string }
 const typeOptions = [
@@ -75,55 +80,6 @@ const date = (value: string) =>
     timeZone: "Africa/Luanda",
   }).format(new Date(value))
 
-function TicketCard({ ticket }: { ticket: ChatTicket }) {
-  const overdue =
-    ticket.nextResponseDueAt &&
-    !["RESOLVED", "CLOSED"].includes(ticket.status) &&
-    new Date(ticket.nextResponseDueAt).getTime() < Date.now()
-  return (
-    <Card className={styles.card}>
-      <div className={styles.cardHeading}>
-        <span>Chamado · {ticket.number}</span>
-        <Badge
-          variant="secondary"
-          className={`border-0 bg-transparent p-0 font-normal ${overdue ? styles.warning : "text-muted-foreground"}`}
-        >
-          ● {statusLabels[ticket.status]}
-        </Badge>
-      </div>
-      <h3 className={styles.cardTitle}>{ticket.title}</h3>
-      <p className={styles.cardDescription}>{ticket.description}</p>
-      <dl className={styles.facts}>
-        <div className={styles.fact}>
-          <dt className={styles.factLabel}>Categoria</dt>
-          <dd className={styles.factValue}>
-            {categoryLabels[ticket.category]}
-          </dd>
-        </div>
-        <div className={styles.fact}>
-          <dt className={styles.factLabel}>Prioridade</dt>
-          <dd className={styles.factValue}>
-            {priorityLabels[ticket.priority]}
-          </dd>
-        </div>
-        <div className={styles.fact}>
-          <dt className={styles.factLabel}>Aberto em</dt>
-          <dd className={styles.factValue}>{date(ticket.createdAt)}</dd>
-        </div>
-        <div className={styles.fact}>
-          <dt className={styles.factLabel}>Última atualização</dt>
-          <dd
-            className={`${styles.factValue} ${overdue ? styles.warning : ""}`}
-          >
-            {date(ticket.updatedAt)}
-            {overdue ? " · prazo vencido" : ""}
-          </dd>
-        </div>
-      </dl>
-    </Card>
-  )
-}
-
 export function Chat({
   user,
   initial,
@@ -136,6 +92,10 @@ export function Chat({
   const [snapshot, setSnapshot] = useState(initial)
   const [history, setHistory] = useState(initialHistory)
   const [content, setContent] = useState("")
+  const composerInput = useRef<HTMLInputElement>(null)
+  const [dismissedTicketActions, setDismissedTicketActions] = useState<
+    string[]
+  >([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [reconnecting, setReconnecting] = useState(false)
@@ -573,6 +533,22 @@ export function Chat({
               const draft = meta?.draftId
                 ? snapshot.drafts.find((d) => d.id === meta.draftId)
                 : undefined
+              const ticketDetail = ticket && meta?.kind === "ticket"
+              const followingMessages = snapshot.messages.slice(index + 1)
+              const nextList = followingMessages.findIndex(
+                (m) => m.metadata?.kind === "tickets"
+              )
+              const nextTicketMessage = (
+                nextList < 0
+                  ? followingMessages
+                  : followingMessages.slice(0, nextList)
+              )
+                .reverse()
+                .find((m) => m.metadata?.kind === "ticket")
+              const selectedNumber =
+                nextTicketMessage?.metadata?.kind === "ticket"
+                  ? nextTicketMessage.metadata.number
+                  : undefined
               const latestDraft =
                 draft &&
                 !snapshot.messages
@@ -620,79 +596,47 @@ export function Chat({
                       )}
                     </div>
                   )}
-                  <div
-                    className={`${styles.bubble} ${message.author === "EMPLOYEE" ? styles.employeeBubble : ""}`}
-                  >
-                    {message.content}
-                    {message.author === "EMPLOYEE" && (
-                      <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-300">
-                        <time>
-                          {new Date(message.createdAt).toLocaleTimeString(
-                            "pt-BR",
-                            { hour: "2-digit", minute: "2-digit" }
-                          )}
-                        </time>
-                        <MessageReceipt
-                          read={wasRead(message, snapshot.activity.analystRead)}
-                        />
-                      </div>
-                    )}
-                  </div>
+                  {!ticketDetail && (
+                    <div
+                      className={`${styles.bubble} ${message.author === "EMPLOYEE" ? styles.employeeBubble : ""}`}
+                    >
+                      {message.content}
+                      {message.author === "EMPLOYEE" && (
+                        <div className="ml-2 inline-flex items-center gap-1 align-middle text-[10px] leading-none text-slate-300">
+                          <time className="sr-only">
+                            {new Date(message.createdAt).toLocaleTimeString(
+                              "pt-BR",
+                              { hour: "2-digit", minute: "2-digit" }
+                            )}
+                          </time>
+                          <MessageReceipt
+                            read={wasRead(
+                              message,
+                              snapshot.activity.analystRead
+                            )}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {meta?.kind === "welcome" && !human && quickOptions()}
                   {meta?.kind === "tickets" && (
-                    <div className={styles.ticketList}>
-                      {snapshot.tickets
-                        .filter((t) =>
-                          meta.candidateNumbers
-                            ? meta.candidateNumbers.includes(t.number)
-                            : true
-                        )
-                        .map((t) => (
-                          <Button
-                            variant="outline"
-                            className={styles.ticketButton}
-                            key={t.number}
-                            disabled={disabled || !!human}
-                            onClick={() =>
-                              void send(`${t.number} · ${t.title}`, {
-                                type: "ticket",
-                                number: t.number,
-                              })
-                            }
-                          >
-                            <span className={styles.radio} />
-                            <small className={styles.ticketMeta}>
-                              {t.number}
-                            </small>
-                            <strong className={styles.ticketTitle}>
-                              {t.title}
-                            </strong>
-                            <span className={styles.ticketMeta}>
-                              <span
-                                className={
-                                  t.status === "WAITING_ANALYST"
-                                    ? "text-amber-500"
-                                    : ["RESOLVED", "CLOSED"].includes(t.status)
-                                      ? "text-emerald-500"
-                                      : "text-primary"
-                                }
-                              >
-                                ●
-                              </span>{" "}
-                              {statusLabels[t.status]}
-                            </span>
-                            <time
-                              className={styles.ticketMeta}
-                              dateTime={t.createdAt}
-                            >
-                              {new Intl.DateTimeFormat("pt-PT", {
-                                day: "2-digit",
-                                month: "short",
-                              }).format(new Date(t.createdAt))}
-                            </time>
-                          </Button>
-                        ))}
-                    </div>
+                    <TicketChoices
+                      tickets={snapshot.tickets.filter(
+                        (t) =>
+                          !meta.candidateNumbers ||
+                          meta.candidateNumbers.includes(t.number)
+                      )}
+                      selected={selectedNumber}
+                      disabled={busy && !human && !limited}
+                      readOnly={!!human || limited}
+                      onSelect={(t) =>
+                        void send(`${t.number} · ${t.title}`, {
+                          type: "ticket",
+                          number: t.number,
+                        })
+                      }
+                    />
                   )}
                   {ticket && (
                     <>
@@ -706,23 +650,64 @@ export function Chat({
                             para reabrir {ticket.number}.
                           </p>
                         )}
-                      {!human && (
-                        <div className={styles.options}>
-                          <Button
-                            variant="outline"
-                            className={styles.optionButton}
-                            disabled={disabled}
-                            onClick={() =>
-                              void send(
-                                `Quero falar com um analista sobre ${ticket.number}.`,
-                                { type: "handoff", number: ticket.number }
-                              )
-                            }
-                          >
-                            Falar com um analista
-                          </Button>
-                        </div>
-                      )}
+                      {ticketDetail &&
+                        !dismissedTicketActions.includes(message.id) && (
+                          <div className={`${styles.bubble} mt-1.5`}>
+                            <p>
+                              {message.content ===
+                              `Consulte os detalhes do chamado ${ticket.number}.`
+                                ? human
+                                  ? "O chamado está com atendimento humano. Pode acrescentar informações pela conversa."
+                                  : ticketOverdue(ticket)
+                                    ? `A última atualização foi ${ticketAge(ticket.updatedAt)} e o prazo de resposta está vencido. Quer que eu chame um analista?`
+                                    : "Confira o resumo do seu chamado. Quer falar com um analista ou adicionar informação?"
+                                : message.content}
+                            </p>
+                            {!human && (
+                              <div className={styles.options}>
+                                <Button
+                                  variant="outline"
+                                  className={styles.optionButton}
+                                  disabled={disabled}
+                                  onClick={() =>
+                                    void send(
+                                      `Quero falar com um analista sobre ${ticket.number}.`,
+                                      { type: "handoff", number: ticket.number }
+                                    )
+                                  }
+                                >
+                                  Falar com um analista
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  className={styles.optionButton}
+                                  disabled={disabled}
+                                  onClick={() => {
+                                    setContent(
+                                      `Quero adicionar uma informação ao chamado ${ticket.number}: `
+                                    )
+                                    composerInput.current?.focus()
+                                  }}
+                                >
+                                  Adicionar informação
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  className={styles.optionButton}
+                                  disabled={disabled}
+                                  onClick={() =>
+                                    setDismissedTicketActions((previous) => [
+                                      ...previous,
+                                      message.id,
+                                    ])
+                                  }
+                                >
+                                  Não, obrigado
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                     </>
                   )}
                   <DecisionPanel
@@ -854,6 +839,7 @@ export function Chat({
             }}
           >
             <Input
+              ref={composerInput}
               className={styles.composerInput}
               aria-label="Mensagem para o Nexo"
               placeholder="Escreva para o Nexo…"

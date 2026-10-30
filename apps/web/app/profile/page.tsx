@@ -4,11 +4,16 @@ import { currentEmployee } from "@/lib/auth"
 import { EmployeeSidebar } from "@/components/employee-sidebar"
 import { Card } from "@workspace/ui/components/card"
 import { styles } from "../chat/styles"
-import { PasswordHelp } from "./password-help"
+import { PasswordSettings } from "./password-settings"
+import { getPrismaClient } from "../../../../src/lib/prisma"
 
 export default async function ProfilePage() {
   const user = await currentEmployee()
   if (!user) redirect("/login")
+  const profile = await getPrismaClient().user.findUniqueOrThrow({
+    where: { id: user.id },
+    select: { passwordChangedAt: true },
+  })
   return (
     <main className={styles.screen}>
       <EmployeeSidebar user={user} active="profile" />
@@ -43,7 +48,9 @@ export default async function ProfilePage() {
                 </div>
               </dl>
             </Card>
-            <PasswordHelp />
+            <PasswordSettings
+              changedAt={profile.passwordChangedAt?.toISOString() ?? null}
+            />
           </div>
         </div>
       </section>

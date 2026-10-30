@@ -1,4 +1,5 @@
 import { conversationActivity } from "./activity"
+import { canReadAnalystMessages } from "./analyst-access"
 import { decisionSelect, publicMessage } from "./decisions"
 import { z } from "zod"
 import { Prisma, type PrismaClient } from "../generated/prisma/client"
@@ -15,7 +16,8 @@ export class AnalystError extends Error {
 }
 const inputSchema = z
   .object({
-    action: z.enum(["claim", "reply", "return", "close"]),
+    action: z.enum(["claim", "reply", "return", "close", "transfer"]),
+    toAnalystId: z.uuid().optional(),
     requestId: z.uuid(),
     revision: z.number().int().nonnegative(),
     content: z.string().trim().min(1).max(4000).optional(),
@@ -39,7 +41,7 @@ export function createAnalystService(db: PrismaClient) {
       throw new AnalystError(403, "Acesso reservado a analistas.")
     return analyst
   }
-  async function detail(analystId: string, id: string) {
+  async function detail(analystId: string, id: string, metadataOnly = false) {
     await authorize(analystId)
     parse(z.uuid(), id)
     return db.$transaction(
@@ -56,48 +58,83 @@ export function createAnalystService(db: PrismaClient) {
               },
             },
             assignedAnalyst: { select: { id: true, name: true } },
-            drafts: {
-              where: { status: "PENDING" },
-              orderBy: { createdAt: "asc" },
-            },
-            messages: {
+          },
+        })
+        if (!conversation)
+          throw new AnalystError(404, "Conversa não encontrada.")
+        const canReadMessages = canReadAnalystMessages(conversation, analystId)
+        if (
+          !canReadMessages &&
+          !metadataOnly &&
+          !["WAITING_ANALYST", "AGENT_ACTIVE"].includes(conversation.status)
+        )
+          throw new AnalystError(
+            403,
+            "Este atendimento pertence a outro analista."
+          )
+        // Query private data only after checking the current assignment.
+        const messages = canReadMessages
+          ? await tx.message.findMany({
+              where: { conversationId: id },
               orderBy: [{ createdAt: "asc" }, { id: "asc" }],
               include: {
                 authorUser: { select: { name: true } },
                 decision: { select: decisionSelect },
               },
-            },
-          },
-        })
-        if (!conversation)
-          throw new AnalystError(404, "Conversa não encontrada.")
-        const tickets = await tx.ticket.findMany({
-          where: { openedById: conversation.employeeId },
-          orderBy: { updatedAt: "desc" },
-          include: { events: { orderBy: { createdAt: "desc" }, take: 20 } },
-        })
-        const handoff = [...conversation.messages]
+            })
+          : []
+        const drafts = canReadMessages
+          ? await tx.ticketDraft.findMany({
+              where: { conversationId: id, status: "PENDING" },
+              orderBy: { createdAt: "asc" },
+            })
+          : []
+        const tickets = canReadMessages
+          ? await tx.ticket.findMany({
+              where: { openedById: conversation.employeeId },
+              orderBy: { updatedAt: "desc" },
+              include: { events: { orderBy: { createdAt: "desc" }, take: 20 } },
+            })
+          : []
+        const handoff = messages
+          .slice()
           .reverse()
           .find(
             (message) =>
               (message.metadata as { kind?: string } | null)?.kind === "handoff"
           )?.metadata as
           { summary?: string; reason?: string; number?: string } | undefined
+        const availableAnalysts =
+          canReadMessages && conversation.status === "ANALYST_ACTIVE"
+            ? await tx.user.findMany({
+                where: {
+                  role: "ANALYST",
+                  demoLoginEnabled: true,
+                  passwordHash: { not: null },
+                  id: { not: analystId },
+                },
+                select: { id: true, name: true },
+                orderBy: { name: "asc" },
+              })
+            : []
         return {
           ...conversation,
-          messages: conversation.messages.map(publicMessage),
+          canReadMessages,
+          messages: messages.map(publicMessage),
+          drafts,
+          tickets,
+          handoff: handoff ?? null,
+          availableAnalysts,
           activity: (
             await conversationActivity(tx, analystId, "ANALYST", [conversation])
           ).get(id)!,
-          tickets,
-          handoff: handoff ?? null,
         }
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
     )
   }
   return {
-    detail,
+    detail: (analystId: string, id: string) => detail(analystId, id),
     async start(analystId: string, sourceId: string, input: unknown) {
       const analyst = await authorize(analystId)
       parse(z.uuid(), sourceId)
@@ -143,6 +180,11 @@ export function createAnalystService(db: PrismaClient) {
             throw new AnalystError(
               409,
               "A conversa mudou. Atualize antes de continuar."
+            )
+          if (source.assignedAnalystId !== analystId)
+            throw new AnalystError(
+              403,
+              "Este atendimento pertence a outro analista."
             )
           if (source.status !== "CLOSED")
             throw new AnalystError(
@@ -210,44 +252,76 @@ export function createAnalystService(db: PrismaClient) {
     },
     async list(analystId: string) {
       await authorize(analystId)
-      // Limit contacts, not sessions: one frequent user must not crowd out the queue.
-      const contacts = await db.conversation.findMany({
-        distinct: ["employeeId"],
-        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-        take: 100,
-        select: { employeeId: true },
-      })
-      const conversations = await db.conversation.findMany({
-        where: { employeeId: { in: contacts.map((c) => c.employeeId) } },
-        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-        include: {
-          employee: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              openedTickets: { select: { number: true } },
+      return db.$transaction(
+        async (tx) => {
+          const contacts = await tx.conversation.findMany({
+            distinct: ["employeeId"],
+            orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+            take: 100,
+            select: { employeeId: true },
+          })
+          const conversations = await tx.conversation.findMany({
+            where: { employeeId: { in: contacts.map((c) => c.employeeId) } },
+            orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+            include: {
+              employee: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  openedTickets: { select: { number: true } },
+                },
+              },
+              assignedAnalyst: { select: { id: true, name: true } },
             },
-          },
-          assignedAnalyst: { select: { id: true, name: true } },
-          messages: {
-            orderBy: { createdAt: "desc" },
-            take: 1,
-            select: { id: true, content: true, author: true, createdAt: true },
-          },
-          drafts: {
-            where: { targetTicketId: { not: null } },
-            select: { targetTicket: { select: { number: true } } },
-          },
+          })
+          const readable = conversations.filter((c) =>
+            canReadAnalystMessages(c, analystId)
+          )
+          const previews = readable.length
+            ? await tx.conversation.findMany({
+                where: {
+                  id: { in: readable.map((c) => c.id) },
+                  assignedAnalystId: analystId,
+                },
+                select: {
+                  id: true,
+                  messages: {
+                    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                    take: 1,
+                    select: {
+                      id: true,
+                      content: true,
+                      author: true,
+                      createdAt: true,
+                    },
+                  },
+                  drafts: {
+                    where: { targetTicketId: { not: null } },
+                    select: { targetTicket: { select: { number: true } } },
+                  },
+                },
+              })
+            : []
+          const activity = await conversationActivity(
+            tx,
+            analystId,
+            "ANALYST",
+            conversations
+          )
+          return conversations.map((c) => {
+            const preview = previews.find((p) => p.id === c.id)
+            return {
+              ...c,
+              canReadMessages: canReadAnalystMessages(c, analystId),
+              messages: preview?.messages ?? [],
+              drafts: preview?.drafts ?? [],
+              activity: activity.get(c.id)!,
+            }
+          })
         },
-      })
-      const activity = await conversationActivity(
-        db,
-        analystId,
-        "ANALYST",
-        conversations
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
       )
-      return conversations.map((c) => ({ ...c, activity: activity.get(c.id)! }))
     },
     async act(analystId: string, id: string, input: unknown) {
       const analyst = await authorize(analystId)
@@ -260,37 +334,49 @@ export function createAnalystService(db: PrismaClient) {
           400,
           "A resolução deve acompanhar o encerramento."
         )
+      if ((data.action === "transfer") !== !!data.toAnalystId)
+        throw new AnalystError(
+          400,
+          "Selecione o analista para a transferência."
+        )
       await db.$transaction(
         async (tx) => {
-          // Same row lock used by employee messages and model proposals.
-          const locked = await tx.conversation.updateMany({
-            where: { id },
-            data: { revision: { increment: 1 } },
-          })
-          if (!locked.count)
+          // Serialize claims, transfers, employee messages and read acknowledgements.
+          const locked = await tx.$queryRaw<
+            { id: string }[]
+          >`SELECT id FROM "Conversation" WHERE id = ${id}::uuid FOR UPDATE`
+          if (!locked.length)
             throw new AnalystError(404, "Conversa não encontrada.")
+          const conversation = await tx.conversation.findUniqueOrThrow({
+            where: { id },
+          })
           const replay = await tx.message.findUnique({
             where: { requestId: data.requestId },
           })
           if (replay) {
-            const metadata = replay.metadata as { action?: string } | null
+            const metadata = replay.metadata as {
+              action?: string
+              toAnalystId?: string
+            } | null
             if (
               replay.conversationId !== id ||
               replay.authorUserId !== analystId ||
               metadata?.action !== data.action ||
-              (data.action === "reply" && replay.content !== data.content)
+              (data.action === "reply" && replay.content !== data.content) ||
+              (data.action === "transfer" &&
+                metadata?.toAnalystId !== data.toAnalystId)
             )
               throw new AnalystError(409, "Pedido já utilizado.")
+            if (
+              !canReadAnalystMessages(conversation, analystId) &&
+              !["return", "transfer"].includes(data.action)
+            )
+              throw new AnalystError(
+                403,
+                "Este atendimento pertence a outro analista."
+              )
             return
           }
-          const conversation = await tx.conversation.findUniqueOrThrow({
-            where: { id },
-          })
-          if (conversation.revision !== data.revision + 1)
-            throw new AnalystError(
-              409,
-              "A conversa mudou. Atualize antes de continuar."
-            )
           const owned =
             conversation.status === "ANALYST_ACTIVE" &&
             conversation.assignedAnalystId === analystId
@@ -321,6 +407,32 @@ export function createAnalystService(db: PrismaClient) {
               "Assuma a conversa antes de responder ou encerrar."
             )
           }
+          if (conversation.revision !== data.revision)
+            throw new AnalystError(
+              409,
+              "A conversa mudou. Atualize antes de continuar."
+            )
+          const recipient =
+            data.action === "transfer"
+              ? await tx.user.findFirst({
+                  where: {
+                    id: data.toAnalystId,
+                    role: "ANALYST",
+                    demoLoginEnabled: true,
+                    passwordHash: { not: null },
+                  },
+                  select: { id: true, name: true },
+                })
+              : null
+          if (
+            data.action === "transfer" &&
+            (!recipient || recipient.id === analystId)
+          )
+            throw new AnalystError(400, "Selecione outro analista ativo.")
+          await tx.conversation.update({
+            where: { id },
+            data: { revision: { increment: 1 } },
+          })
           const handoff = await tx.message.findFirst({
             where: {
               conversationId: id,
@@ -352,7 +464,9 @@ export function createAnalystService(db: PrismaClient) {
                   ? { status: "ANALYST_ACTIVE", assignedAnalystId: analystId }
                   : data.action === "return"
                     ? { status: "AGENT_ACTIVE", assignedAnalystId: null }
-                    : { status: "CLOSED", closedAt: now },
+                    : data.action === "transfer"
+                      ? { assignedAnalystId: recipient!.id }
+                      : { status: "CLOSED", closedAt: now },
             })
           }
           if (data.action === "close") {
@@ -375,7 +489,9 @@ export function createAnalystService(db: PrismaClient) {
                       lastResponseAt: now,
                       nextResponseDueAt: null,
                     }
-                  : data.action === "claim" || data.action === "return"
+                  : data.action === "claim" ||
+                      data.action === "return" ||
+                      data.action === "transfer"
                     ? { status: "IN_PROGRESS" as const }
                     : null
             if (update)
@@ -390,11 +506,15 @@ export function createAnalystService(db: PrismaClient) {
                         ? "RESOLVED"
                         : data.action === "reply"
                           ? "ANALYST_RESPONSE"
-                          : data.action === "claim"
+                          : data.action === "claim" ||
+                              data.action === "transfer"
                             ? "ASSIGNED"
                             : "RETURNED_TO_AGENT",
                       metadata: {
                         conversationId: id,
+                        ...(data.action === "transfer"
+                          ? { toAnalystId: recipient!.id }
+                          : {}),
                         ...(data.content ? { content: data.content } : {}),
                       },
                     },
@@ -407,13 +527,15 @@ export function createAnalystService(db: PrismaClient) {
             orderBy: { createdAt: "desc" },
           })
           const content =
-            data.action === "reply"
-              ? data.content!
-              : data.action === "claim"
-                ? `${analyst.name} assumiu o atendimento. O assistente permanece pausado.`
-                : data.action === "return"
-                  ? `${analyst.name} devolveu a conversa ao assistente. Pode continuar a conversa.`
-                  : `${analyst.name} encerrou o atendimento.${data.resolveTicket ? " O chamado associado foi resolvido." : ""}`
+            data.action === "transfer"
+              ? `${analyst.name} transferiu o atendimento para ${recipient!.name}.`
+              : data.action === "reply"
+                ? data.content!
+                : data.action === "claim"
+                  ? `${analyst.name} assumiu o atendimento. O assistente permanece pausado.`
+                  : data.action === "return"
+                    ? `${analyst.name} devolveu a conversa ao assistente. Pode continuar a conversa.`
+                    : `${analyst.name} encerrou o atendimento.${data.resolveTicket ? " O chamado associado foi resolvido." : ""}`
           await tx.message.create({
             data: {
               conversationId: id,
@@ -421,7 +543,13 @@ export function createAnalystService(db: PrismaClient) {
               authorUserId: analystId,
               content,
               requestId: data.requestId,
-              metadata: { kind: "analyst-action", action: data.action },
+              metadata: {
+                kind: "analyst-action",
+                action: data.action,
+                ...(data.action === "transfer"
+                  ? { toAnalystId: recipient!.id }
+                  : {}),
+              },
               createdAt: new Date(
                 Math.max(now.getTime(), (latest?.createdAt.getTime() ?? 0) + 1)
               ),
@@ -430,7 +558,11 @@ export function createAnalystService(db: PrismaClient) {
         },
         { timeout: 15000 }
       )
-      return detail(analystId, id)
+      return detail(
+        analystId,
+        id,
+        data.action === "transfer" || data.action === "return"
+      )
     },
   }
 }

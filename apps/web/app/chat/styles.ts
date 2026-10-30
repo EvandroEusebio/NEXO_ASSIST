@@ -56,13 +56,15 @@ export const styles = {
     "h-auto rounded-lg border border-border bg-white px-3 py-[7px] text-[13px] hover:bg-accent",
   primary:
     "inline-flex h-auto items-center justify-center gap-[7px] rounded-[7px] border-0 bg-primary px-3.5 py-[9px] font-semibold text-primary-foreground hover:bg-[#0055ab]",
-  card: "mt-1.5 block overflow-hidden rounded-[17px] border border-border bg-card px-[18px] py-4 text-card-foreground shadow-[0_1px_3px_#1b24310b] max-[700px]:p-3.5",
+  card: "mt-1.5 block gap-0 overflow-hidden rounded-[18px] border border-border bg-card px-[18px] py-4 text-card-foreground shadow-[0_1px_3px_#1b24310b] ring-0 max-[700px]:p-3.5",
   cardHeading:
     "mb-[7px] flex flex-wrap justify-between gap-2 text-xs text-muted-foreground",
   cardTitle:
-    "mb-1.5 text-lg font-semibold [overflow-wrap:anywhere] max-[700px]:text-base",
+    "mb-1.5 text-lg leading-6 font-semibold [overflow-wrap:anywhere] max-[700px]:text-base",
   cardDescription:
-    "text-[13px] leading-[21px] whitespace-pre-wrap text-[#3d4656] [overflow-wrap:anywhere]",
+    "text-sm leading-[22px] whitespace-pre-wrap text-[#3d4656] [overflow-wrap:anywhere]",
+  ticketFacts:
+    "mt-3.5 grid grid-cols-4 gap-4 border-t border-border pt-3 max-[1000px]:grid-cols-2 max-[420px]:gap-x-3 [&_dd]:[overflow-wrap:anywhere]",
   facts:
     "mt-3.5 flex flex-wrap gap-5 border-t border-border pt-2.5 max-[700px]:gap-3",
   fact: "min-w-[130px] flex-1",
@@ -74,10 +76,10 @@ export const styles = {
   ticketList:
     "mt-1.5 overflow-hidden rounded-2xl border border-border shadow-[0_2px_4px_#1b243108]",
   ticketButton:
-    "flex h-auto w-full items-center justify-start gap-3 rounded-none border-0 border-b border-border px-4 py-[13px] text-left whitespace-normal last:border-b-0 hover:bg-accent max-[1050px]:flex-wrap",
-  ticketTitle: "flex-1 font-medium max-[1050px]:basis-[65%]",
-  ticketMeta: "text-xs text-muted-foreground",
-  radio: "size-4 shrink-0 rounded-full border border-[#cbd0d8]",
+    "grid h-auto min-h-[46px] w-full grid-cols-[16px_62px_minmax(0,1fr)_auto_48px] items-center justify-start gap-3 rounded-none border-0 border-b border-border px-4 py-2.5 text-left whitespace-normal font-normal last:border-b-0 hover:bg-[#f4f8fc] disabled:opacity-100 max-[1000px]:grid-cols-[16px_62px_minmax(0,1fr)] max-[1000px]:gap-y-1 max-[1000px]:[&>span:nth-child(4)]:col-start-3 max-[1000px]:[&>span:nth-child(4)]:justify-start max-[1000px]:[&>time]:hidden",
+  ticketTitle: "min-w-0 text-sm font-medium leading-5 [overflow-wrap:anywhere]",
+  ticketMeta: "text-xs leading-4 whitespace-nowrap text-muted-foreground",
+  radio: "size-4 shrink-0 rounded-full border",
   composerArea:
     "mx-auto w-[calc(100%_-_48px)] max-w-[808px] pb-4 max-[700px]:w-[calc(100%_-_28px)] max-[700px]:pb-2.5",
   composer:

@@ -15,10 +15,13 @@
     "scripts/check-ticket-rules.ts",
     "scripts/check-ticket-matching.ts",
     "scripts/check-auth.ts",
+    "scripts/check-passwords.ts",
+    "scripts/seed-auth.ts",
     "scripts/check-chat.ts",
     "scripts/check-agent.ts",
     "src/mastra/**/*.ts",
     "scripts/check-analyst.ts",
+    "scripts/check-analyst-access.ts",
     "scripts/check-decisions.ts",
     "scripts/check-activity.ts"
   ]

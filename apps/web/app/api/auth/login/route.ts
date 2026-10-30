@@ -39,7 +39,7 @@ export async function POST(request: Request) {
         { error: error.message },
         { status: error.code === "INVALID_INPUT" ? 400 : 401 }
       )
-    console.error("Falha no login de demonstração:", error)
+    console.error("Falha no login:", error)
     return NextResponse.json(
       { error: "Serviço de login indisponível." },
       { status: 503 }

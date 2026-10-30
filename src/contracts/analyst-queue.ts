@@ -21,7 +21,8 @@ export function groupAnalystQueue(
   queue: AnalystConversation[],
   analystId: string,
   filter = "all",
-  search = ""
+  search = "",
+  selectedId?: string | null
 ) {
   const groups = new Map<string, AnalystConversation[]>()
   for (const c of queue)
@@ -44,8 +45,10 @@ export function groupAnalystQueue(
       )
         return []
       // Prefer an actionable thread; never silently switch an already opened thread.
+      const selected = matching.find((t) => t.id === selectedId)
       const current =
-        filter === "all"
+        selected ??
+        (filter === "all"
           ? (matching.find(
               (t) =>
                 t.status === "ANALYST_ACTIVE" &&
@@ -53,21 +56,22 @@ export function groupAnalystQueue(
             ) ??
             matching.find((t) => t.status === "WAITING_ANALYST") ??
             c)
-          : c
+          : c)
       return [
         {
           ...current,
           threads,
-          updatedAt: threads[0]!.updatedAt,
+          updatedAt: current.updatedAt,
           activity: {
             ...current.activity,
-            unreadCount: threads.reduce(
-              (total, t) => total + t.activity.unreadCount,
-              0
-            ),
+            unreadCount:
+              current.status === "ANALYST_ACTIVE" &&
+              current.assignedAnalystId === analystId
+                ? current.activity.unreadCount
+                : 0,
             employee: {
               online: threads.some((t) => t.activity.employee.online),
-              typing: threads.some((t) => t.activity.employee.typing),
+              typing: current.activity.employee.typing,
             },
           },
         },
