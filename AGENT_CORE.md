@@ -31,7 +31,7 @@ O uso gratuito depende do plano e das quotas da conta Groq: o código não alter
 
 A inferência acontece fora da transação PostgreSQL. Antes de aplicar a proposta, o backend revalida a revisão da conversa, o estado, a posse e o limite de 30 mensagens. Se a conversa mudou durante a inferência, responde 409 e não aplica a proposta antiga. Reenvios de pedidos já concluídos reutilizam a mensagem persistida sem chamar Groq. Dois pedidos simultâneos ainda podem consumir duas inferências, mas as escritas são serializadas.
 
-Cada resposta do agente grava `AgentDecision` com intenção, ação efetiva, justificativa curta, confiança e fontes utilizadas. Metadados guardam modelo, ferramenta e contagem de tokens; não guardam raciocínio interno. O painel visual de decisões é a etapa 14. A persistência usa as tabelas já existentes, sem nova migração.
+Cada resposta do agente grava `AgentDecision` com intenção, ação efetiva, justificativa curta, confiança e fontes utilizadas. Metadados guardam modelo, ferramenta e contagem de tokens; não guardam raciocínio interno. O painel expandível de decisões está disponível no chat e no console; ver `DECISION_TRANSPARENCY.md`. A persistência usa as tabelas já existentes, sem nova migração.
 
 ## Testar
 

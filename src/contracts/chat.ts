@@ -1,3 +1,5 @@
+import type { ConversationActivity } from "./activity"
+import type { PublicDecision } from "./decisions"
 export const MESSAGE_LIMIT = 30
 export const categoryLabels: Record<string, string> = {
   ACCESS: "Acessos",
@@ -54,6 +56,7 @@ export type ChatTicket = {
   resolvedAt: string | null
 }
 export type ChatMessage = {
+  decision: PublicDecision | null
   id: string
   author: string
   content: string
@@ -75,6 +78,7 @@ export type ChatDraft = {
   targetTicket: { number: string } | null
 }
 export type ChatSnapshot = {
+  activity: ConversationActivity
   id: string
   status: string
   revision: number
@@ -85,6 +89,7 @@ export type ChatSnapshot = {
   limit: number
 }
 export type ConversationSummary = {
+  unreadCount: number
   id: string
   status: string
   updatedAt: string

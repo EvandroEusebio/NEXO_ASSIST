@@ -28,3 +28,7 @@ Inicie a aplicação na porta 3100 com `pnpm --filter web dev --port 3100` e exe
 Rotas disponíveis: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/session`, `GET /api/tickets` e `GET /api/tickets/:number`. Criação e complemento estão disponíveis pelo rascunho confirmado do chat; reabertura será integrada nas próximas etapas. O agente está documentado em `AGENT_CORE.md`.
 
 A tela de identificação segue a referência visual em `docs/Identificação (desktop) (1).png`, com adaptação para telemóvel. Os controlos usam a biblioteca shadcn/ui do projeto, documentada em `UI_COMPONENTS.md`. O controlo do olho alterna a visibilidade da senha; os links de ajuda e privacidade abrem informações da demonstração. A conversa e os indicadores do painel esquerdo são ilustrativos.
+
+A sessão também controla os indicadores de presença. O logout remove a presença de todas as abas dessa sessão; ver `CONVERSATION_ACTIVITY.md`.
+
+O funcionário pode consultar os dados reais da sessão em `/profile`. A opção “Redefinir senha” explica o acesso de demonstração; não armazena senhas nem simula envio de e-mail. Detalhes em `EMPLOYEE_PROFILE.md`.

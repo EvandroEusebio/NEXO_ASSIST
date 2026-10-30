@@ -1,3 +1,5 @@
+import { conversationActivity } from "./activity"
+import { decisionSelect, publicMessage } from "./decisions"
 import { z } from "zod"
 import { Prisma, type PrismaClient } from "../generated/prisma/client"
 import { responseDueAt } from "./sla"
@@ -60,7 +62,10 @@ export function createAnalystService(db: PrismaClient) {
             },
             messages: {
               orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-              include: { authorUser: { select: { name: true } } },
+              include: {
+                authorUser: { select: { name: true } },
+                decision: { select: decisionSelect },
+              },
             },
           },
         })
@@ -78,7 +83,15 @@ export function createAnalystService(db: PrismaClient) {
               (message.metadata as { kind?: string } | null)?.kind === "handoff"
           )?.metadata as
           { summary?: string; reason?: string; number?: string } | undefined
-        return { ...conversation, tickets, handoff: handoff ?? null }
+        return {
+          ...conversation,
+          messages: conversation.messages.map(publicMessage),
+          activity: (
+            await conversationActivity(tx, analystId, "ANALYST", [conversation])
+          ).get(id)!,
+          tickets,
+          handoff: handoff ?? null,
+        }
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
     )
@@ -87,9 +100,16 @@ export function createAnalystService(db: PrismaClient) {
     detail,
     async list(analystId: string) {
       await authorize(analystId)
-      return db.conversation.findMany({
-        orderBy: { updatedAt: "desc" },
+      // Limit contacts, not sessions: one frequent user must not crowd out the queue.
+      const contacts = await db.conversation.findMany({
+        distinct: ["employeeId"],
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         take: 100,
+        select: { employeeId: true },
+      })
+      const conversations = await db.conversation.findMany({
+        where: { employeeId: { in: contacts.map((c) => c.employeeId) } },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         include: {
           employee: {
             select: {
@@ -103,7 +123,7 @@ export function createAnalystService(db: PrismaClient) {
           messages: {
             orderBy: { createdAt: "desc" },
             take: 1,
-            select: { content: true },
+            select: { id: true, content: true, author: true, createdAt: true },
           },
           drafts: {
             where: { targetTicketId: { not: null } },
@@ -111,6 +131,13 @@ export function createAnalystService(db: PrismaClient) {
           },
         },
       })
+      const activity = await conversationActivity(
+        db,
+        analystId,
+        "ANALYST",
+        conversations
+      )
+      return conversations.map((c) => ({ ...c, activity: activity.get(c.id)! }))
     },
     async act(analystId: string, id: string, input: unknown) {
       const analyst = await authorize(analystId)

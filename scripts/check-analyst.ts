@@ -1,4 +1,6 @@
 import "dotenv/config"
+import { groupAnalystQueue } from "../src/contracts/analyst-queue"
+import type { AnalystConversation } from "../src/contracts/analyst"
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
 import { createPrismaClient } from "../src/lib/prisma"
@@ -56,6 +58,45 @@ async function main() {
   assert.match(detail.handoff!.summary!, /Preciso de uma pessoa/)
   assert.equal(detail.handoff?.number, ticket.number)
   await assert.rejects(analysts.list(employee), { status: 403 })
+  const otherThread = randomUUID()
+  await conversations.create(employee, { id: otherThread })
+  const queue = JSON.parse(
+    JSON.stringify(await analysts.list(first))
+  ) as AnalystConversation[]
+  const contacts = groupAnalystQueue(queue, first).filter(
+    (c) => c.employee.id === employee
+  )
+  assert.equal(contacts.length, 1, "A user with two sessions must appear once")
+  assert.equal(contacts[0]!.threads.length, 2)
+  assert.equal(
+    contacts[0]!.id,
+    id,
+    "A waiting session must not be hidden by a newer agent session"
+  )
+  assert.equal(
+    contacts[0]!.activity.unreadCount,
+    queue
+      .filter((c) => c.employee.id === employee)
+      .reduce((n, c) => n + c.activity.unreadCount, 0)
+  )
+  assert.equal(
+    groupAnalystQueue(queue, first, "agent").find(
+      (c) => c.employee.id === employee
+    )!.id,
+    otherThread
+  )
+  assert.equal(
+    groupAnalystQueue(queue, first, "waiting", ticket.number).filter(
+      (c) => c.employee.id === employee
+    ).length,
+    1
+  )
+  assert.equal(
+    groupAnalystQueue(queue, first, "mine").filter(
+      (c) => c.employee.id === employee
+    ).length,
+    0
+  )
   const race = await Promise.allSettled(
     [first, second].map((user) =>
       analysts.act(user, id, {

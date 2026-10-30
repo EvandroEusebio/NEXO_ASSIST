@@ -18,6 +18,8 @@
     "scripts/check-chat.ts",
     "scripts/check-agent.ts",
     "src/mastra/**/*.ts",
-    "scripts/check-analyst.ts"
+    "scripts/check-analyst.ts",
+    "scripts/check-decisions.ts",
+    "scripts/check-activity.ts"
   ]
 }

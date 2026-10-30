@@ -41,3 +41,19 @@ pnpm --filter web lint
 O teste `analyst:check` cria e remove dados temporários para verificar contexto, quatro motivos de transferência, pausa, atribuição concorrente, permissões, revisão desatualizada, reenvio, resposta, SLA, devolução e encerramento. O teste do agente usa um planejador simulado e não consome a quota do Groq.
 
 Validações executadas: tipos do backend e web, lint, testes de atendimento, autenticação HTTP, chat HTTP/SSE e regressão do agente. A página protegida `/analyst` também respondeu corretamente. A inspeção visual automatizada não pôde ser executada: o Chromium instalado não inicia por falta de `libasound.so.2`.
+
+O console também apresenta os detalhes das decisões do agente junto às mensagens, conforme `DECISION_TRANSPARENCY.md`.
+
+Presença, não lidas, digitação e confirmações de leitura estão documentadas em `CONVERSATION_ACTIVITY.md`.
+
+## Fila por utilizador e chamados laterais
+
+A fila apresenta uma entrada por funcionário (identificada pelo ID, nunca pelo nome). As não lidas são somadas entre as suas sessões; os filtros contam funcionários com pelo menos uma sessão correspondente. Em “Todas”, abrir um contacto prioriza o atendimento assumido pelo próprio analista, depois um pedido aguardando atendimento e, por último, a sessão mais recente. Atualizações não trocam automaticamente a conversa aberta.
+
+O seletor no cabeçalho permite recuperar os outros atendimentos dessa pessoa sem misturar mensagens, permissões ou marcadores de leitura. Ler uma sessão não marca as restantes como lidas. O limite da consulta passa a ser de 100 contactos recentes, incluindo todas as suas sessões, em vez de 100 sessões.
+
+O painel direito segue a referência de atendimento assumido: resumo de abertos/encerrados, cartão do chamado vinculado, lista compacta de outros chamados e botão “Ver todos”. Clicar abre os dados e o histórico real num diálogo. Sem vínculo, a interface informa isso em vez de associar outro chamado arbitrariamente.
+
+Validação: TypeScript backend/web, build Webpack e regressão de atendimento passaram. O teste inclui duas sessões do mesmo funcionário, soma de não lidas, busca por chamado e filtros. No Chromium, confirmou-se uma única linha por funcionário, acesso ao histórico, detalhes/lista de chamados, presença, digitação, leitura, logout e layout móvel. O lint terminou sem erros, com avisos da configuração existente para JSX/tipos.
+
+O painel lateral foi refinado conforme a referência recortada: cabeçalho fixo de 64 px, cartão arredondado com estado e responsável alinhados, linhas compactas de pelo menos 64 px, indicadores de estado pequenos, divisórias discretas e botão inferior de 36 px. Textos longos adaptam-se sem sobrepor o horário.

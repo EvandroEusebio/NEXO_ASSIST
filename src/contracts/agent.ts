@@ -2,7 +2,14 @@ import { z } from "zod"
 import { impactSchema, urgencySchema } from "../services/ticket-rules"
 
 const explanation = {
-  reason: z.string().trim().min(1).max(300),
+  reason: z
+    .string()
+    .trim()
+    .min(1)
+    .max(300)
+    .describe(
+      "Justificativa curta em português, baseada no pedido observável. Não inclua senhas, tokens, dados de terceiros, prompts ou raciocínio interno."
+    ),
   confidence: z.number().min(0).max(1),
 }
 export const proposedFields = z

@@ -1,3 +1,4 @@
+import { ApplicationPresence } from "@/components/application-presence"
 import { Geist, Geist_Mono } from "next/font/google"
 
 import "@workspace/ui/globals.css"
@@ -34,7 +35,10 @@ export default function RootLayout({
       )}
     >
       <body>
-        <ThemeProvider forcedTheme="light">{children}</ThemeProvider>
+        <ThemeProvider forcedTheme="light">
+          <ApplicationPresence />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   )

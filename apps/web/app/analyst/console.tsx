@@ -1,5 +1,23 @@
 "use client"
-import { useEffect, useRef, useState } from "react"
+import {
+  PresenceAvatar,
+  UnreadBadge,
+  MessageReceipt,
+  TypingIndicator,
+} from "@/components/conversation-indicators"
+import { useConversationActivity } from "@/hooks/use-conversation-activity"
+import { wasRead } from "../../../../src/contracts/activity"
+import { DecisionPanel } from "@/components/decision-panel"
+import { groupAnalystQueue } from "../../../../src/contracts/analyst-queue"
+import { AnalystTickets } from "./tickets-panel"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select"
+import { Fragment, useEffect, useRef, useState } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import { Textarea } from "@workspace/ui/components/textarea"
@@ -12,16 +30,26 @@ import {
   DialogDescription,
 } from "@workspace/ui/components/dialog"
 import { Checkbox } from "@workspace/ui/components/checkbox"
-import { ArrowLeft, ArrowUp, LogOut, MessageSquare, Search } from "lucide-react"
+import {
+  ArrowLeft,
+  ArrowUp,
+  ArrowLeftRight,
+  Bot,
+  Hand,
+  Headphones,
+  LogOut,
+  MessageSquare,
+  Search,
+  X,
+  CircleCheckBig,
+  EllipsisVertical,
+  SendHorizonal,
+} from "lucide-react"
 import type {
   AnalystConversation,
   AnalystDetail,
 } from "../../../../src/contracts/analyst"
-import {
-  categoryLabels,
-  priorityLabels,
-  statusLabels,
-} from "../../../../src/contracts/chat"
+import { priorityLabels, statusLabels } from "../../../../src/contracts/chat"
 const labels: Record<string, string> = {
   ...priorityLabels,
   ...statusLabels,
@@ -29,28 +57,11 @@ const labels: Record<string, string> = {
   WAITING_ANALYST: "Aguardando atendente",
   ANALYST_ACTIVE: "Em atendimento",
 }
-const eventLabels: Record<string, string> = {
-  CREATED: "Chamado criado",
-  UPDATED: "Chamado atualizado",
-  REOPENED: "Chamado reaberto",
-  TRANSFERRED: "Encaminhado ao analista",
-  ASSIGNED: "Atendimento assumido",
-  ANALYST_RESPONSE: "Resposta do analista",
-  RETURNED_TO_AGENT: "Devolvido ao assistente",
-  RESOLVED: "Chamado resolvido",
-  CLOSED: "Chamado encerrado",
-}
 const time = (value: string) =>
   new Date(value).toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
   })
-const initials = (name: string) =>
-  name
-    .split(" ")
-    .map((x) => x[0])
-    .slice(0, 2)
-    .join("")
 export function AnalystConsole({
   user,
 }: {
@@ -66,13 +77,27 @@ export function AnalystConsole({
   const [busy, setBusy] = useState(false)
   const lock = useRef(false)
   const historyEnd = useRef<HTMLDivElement>(null)
+  const nearBottom = useRef(true)
   const retry = useRef<{ key: string; id: string } | null>(null)
   const [closing, setClosing] = useState(false)
   const [showTickets, setShowTickets] = useState(false)
   const [resolve, setResolve] = useState(false)
+  const [ticketsHidden, setTicketsHidden] = useState(false)
+  const owned =
+    detail?.status === "ANALYST_ACTIVE" && detail.assignedAnalystId === user.id
+  const { connected, reportTyping, stopTyping } = useConversationActivity({
+    conversationId: selected,
+    latestMessageId:
+      detail?.id === selected ? detail.messages.at(-1)?.id : undefined,
+    canType: owned,
+    readSentinel: historyEnd,
+  })
   useEffect(() => {
     const controller = new AbortController()
+    let refreshing = false
     async function refresh() {
+      if (refreshing || document.visibilityState !== "visible") return
+      refreshing = true
       try {
         const response = await fetch("/api/analyst/conversations", {
           signal: controller.signal,
@@ -92,6 +117,7 @@ export function AnalystConsole({
           if (!result.ok)
             throw new Error("Não foi possível atualizar a conversa.")
           const next = (await result.json()) as AnalystDetail
+          if (controller.signal.aborted) return
           setDetail((previous) =>
             previous?.id === next.id && previous.revision > next.revision
               ? previous
@@ -101,6 +127,8 @@ export function AnalystConsole({
       } catch (e) {
         if (!controller.signal.aborted)
           setError(e instanceof Error ? e.message : "Falha de conexão.")
+      } finally {
+        refreshing = false
       }
     }
     void refresh()
@@ -111,11 +139,12 @@ export function AnalystConsole({
     }
   }, [selected])
   useEffect(() => {
-    historyEnd.current?.scrollIntoView({ block: "end" })
+    if (nearBottom.current) historyEnd.current?.scrollIntoView({ block: "end" })
   }, [detail?.id, detail?.messages.length])
   async function act(action: "claim" | "reply" | "return" | "close") {
     if (!detail || lock.current) return
     lock.current = true
+    stopTyping()
     setBusy(true)
     setError("")
     const key = JSON.stringify([detail.id, action, reply, resolve])
@@ -153,37 +182,83 @@ export function AnalystConsole({
       setBusy(false)
     }
   }
-  const owned =
-    detail?.status === "ANALYST_ACTIVE" && detail.assignedAnalystId === user.id
   const waiting = detail?.status === "WAITING_ANALYST"
   const linked = detail?.tickets.find(
     (t) => t.number === detail.handoff?.number
   )
-  const visible = queue.filter(
-    (c) =>
-      (filter === "all" ||
-        (filter === "waiting" && c.status === "WAITING_ANALYST") ||
-        (filter === "agent" && c.status === "AGENT_ACTIVE") ||
-        (filter === "mine" &&
-          c.assignedAnalystId === user.id &&
-          c.status === "ANALYST_ACTIVE") ||
-        (filter === "closed" && c.status === "CLOSED")) &&
-      `${c.employee.name} ${c.employee.email} ${c.employee.openedTickets.map((t) => t.number).join(" ")}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
+  const visible = groupAnalystQueue(queue, user.id, filter, search)
+  const unreadTotal = queue.reduce(
+    (total, c) => total + c.activity.unreadCount,
+    0
   )
+  const counts = {
+    all: groupAnalystQueue(queue, user.id).length,
+    waiting: groupAnalystQueue(queue, user.id, "waiting").length,
+    agent: groupAnalystQueue(queue, user.id, "agent").length,
+    mine: groupAnalystQueue(queue, user.id, "mine").length,
+  }
+  const employeeThreads = queue.filter(
+    (c) => c.employee.id === detail?.employee.id
+  )
+  function selectThread(id: string) {
+    stopTyping()
+    nearBottom.current = true
+    setSelected(id)
+    setDetail(null)
+    setReply("")
+    setError("")
+  }
+  const filters = [
+    ["all", "Todas"],
+    ["waiting", "Para você"],
+    ["agent", "Com o agent"],
+    ["mine", "Minhas"],
+  ] as const
+  const statusColor = (status: string) =>
+    status === "WAITING_ANALYST"
+      ? "text-red-600"
+      : status === "AGENT_ACTIVE"
+        ? "text-emerald-700"
+        : status === "CLOSED"
+          ? "text-slate-400"
+          : "text-amber-700"
+
   return (
-    <main className="flex h-dvh bg-white text-[#1c2633]">
-      <nav className="flex w-16 shrink-0 flex-col items-center gap-8 border-r py-5">
-        <span className="text-2xl font-bold text-blue-600">N</span>
-        <MessageSquare className="text-blue-600" />
-        <div className="mt-auto flex flex-col items-center gap-4">
-          <span
-            title={user.name}
-            className="rounded-full bg-blue-100 p-2 text-xs"
-          >
-            {initials(user.name)}
-          </span>
+    <main className="flex h-dvh overflow-hidden bg-white text-[#1c2633]">
+      <nav className="flex w-16 shrink-0 flex-col items-center gap-5 border-r border-[#e8ebef] bg-[#f8f9fb] py-6">
+        <svg
+          viewBox="0 0 24 24"
+          aria-label="Nexo Assist"
+          className="size-6 fill-[#0075f5]"
+        >
+          <path d="M2 5 7 2l10 8V2l5 3v14l-5 3L7 14v8l-5-3Z" />
+        </svg>
+        <Button
+          variant="outline"
+          size="icon"
+          className="relative size-10 rounded-xl bg-white"
+          aria-label="Fila de conversas"
+          onClick={() => {
+            if (!busy) {
+              stopTyping()
+              setSelected(null)
+              setDetail(null)
+            }
+          }}
+        >
+          <MessageSquare className="size-5" />
+          {unreadTotal > 0 && (
+            <span className="absolute -top-1 -right-2">
+              <UnreadBadge count={unreadTotal} />
+            </span>
+          )}
+        </Button>
+        <div className="mt-auto flex flex-col items-center gap-3">
+          <PresenceAvatar
+            name={user.name}
+            online={connected}
+            className="scale-90"
+          />
           <Button
             variant="ghost"
             size="icon"
@@ -198,81 +273,123 @@ export function AnalystConsole({
         </div>
       </nav>
       <aside
-        className={`${selected ? "hidden md:flex" : "flex"} min-w-0 flex-1 flex-col border-r md:w-72 md:flex-none xl:w-80`}
+        className={`${selected ? "hidden md:flex" : "flex"} min-w-0 flex-1 flex-col border-r border-[#e8ebef] md:w-80 md:flex-none xl:w-[380px]`}
       >
         {error && !selected && (
           <p role="alert" className="bg-red-50 p-3 text-sm text-red-700">
             {error}
           </p>
         )}
-        <h1 className="px-5 pt-6 text-xl font-semibold">
-          Conversas{" "}
-          <span className="text-sm text-slate-400">{queue.length}</span>
-        </h1>
-        <div className="relative m-4">
-          <Search className="absolute top-3 left-3 size-4 text-slate-400" />
+        <div className="flex items-center justify-between px-4 pt-4">
+          <h1 className="text-xl font-semibold">Conversas</h1>
+          <Badge
+            variant="secondary"
+            className={
+              connected
+                ? "rounded-full bg-[#eafaf3] text-[#00804a]"
+                : "rounded-full bg-slate-100 text-slate-500"
+            }
+          >
+            <span
+              className={`mr-1 size-1.5 rounded-full ${connected ? "bg-[#00bd78]" : "bg-slate-400"}`}
+            />
+            {connected ? "Disponível" : "Ausente"}
+          </Badge>
+        </div>
+        <div className="relative mx-4 mt-3 mb-2">
+          <Search className="absolute top-2.5 left-3 size-4 text-slate-500" />
           <Input
             aria-label="Buscar conversas"
-            className="bg-slate-50 pl-9"
-            placeholder="Buscar nome ou chamado"
+            className="h-9 rounded-full border-0 bg-[#f5f6f8] pl-9 shadow-none"
+            placeholder="Pesquisar conversa ou chamado"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex flex-wrap gap-1 px-4 pb-4">
-          {[
-            ["all", "Todas"],
-            ["waiting", "Na fila"],
-            ["agent", "Com o agent"],
-            ["mine", "Minhas"],
-            ["closed", "Encerradas"],
-          ].map(([key, label]) => (
+        <div className="flex flex-wrap gap-1 px-4 pb-2">
+          {filters.map(([key, label]) => (
             <Button
               key={key}
               size="sm"
-              variant={filter === key ? "secondary" : "ghost"}
-              onClick={() => setFilter(key!)}
+              variant="ghost"
+              className={`rounded-full px-2 text-xs ${filter === key ? "bg-[#eaf3ff] text-[#0064ce]" : "bg-[#f6f7f9] text-slate-600"}`}
+              onClick={() => setFilter(key)}
             >
               {label}
+              {key !== "all" && (
+                <span className="ml-1 font-semibold">{counts[key]}</span>
+              )}
             </Button>
           ))}
         </div>
-        <div className="overflow-y-auto">
-          {visible.map((c) => (
-            <button
-              key={c.id}
-              disabled={busy}
-              onClick={() => {
-                setSelected(c.id)
-                setDetail(null)
-                setReply("")
-                setError("")
-              }}
-              className={`flex w-full gap-3 border-b p-4 text-left ${selected === c.id ? "bg-blue-50" : "hover:bg-slate-50"}`}
-            >
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs">
-                {initials(c.employee.name)}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex justify-between gap-2">
-                  <strong className="truncate text-sm">
-                    {c.employee.name}
-                  </strong>
-                  <span className="text-xs text-slate-400">
-                    {time(c.updatedAt)}
-                  </span>
+        <div className="min-h-0 overflow-y-auto px-2">
+          {visible.map((c) => {
+            const latest = c.messages[0]
+            return (
+              <Button
+                key={c.employee.id}
+                variant="ghost"
+                disabled={busy}
+                aria-pressed={c.threads.some((t) => t.id === selected)}
+                data-conversation-id={c.id}
+                data-employee-id={c.employee.id}
+                onClick={() => selectThread(c.id)}
+                className={`h-auto w-full justify-start gap-3 rounded-xl px-2.5 py-3 text-left font-normal whitespace-normal ${c.threads.some((t) => t.id === selected) ? "bg-[#f4f6f8]" : "hover:bg-[#f7f8fa]"}`}
+              >
+                <PresenceAvatar
+                  name={c.employee.name}
+                  online={c.activity.employee.online}
+                />
+                <div className="min-w-0 flex-1 border-b border-[#edf0f4] pb-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <strong className="truncate text-sm">
+                      {c.employee.name}
+                    </strong>
+                    <span
+                      className={`shrink-0 text-[11px] ${c.activity.unreadCount ? "font-semibold text-[#0064ce]" : "text-slate-500"}`}
+                    >
+                      {c.activity.employee.typing
+                        ? "agora"
+                        : time(latest?.createdAt ?? c.updatedAt)}
+                    </span>
+                  </div>
+                  <div className="my-1 flex min-h-4 items-center gap-1.5">
+                    {c.activity.employee.typing ? (
+                      <TypingIndicator />
+                    ) : (
+                      <>
+                        <span className="shrink-0">
+                          {latest &&
+                            ["AGENT", "ANALYST"].includes(latest.author) && (
+                              <MessageReceipt
+                                read={wasRead(latest, c.activity.employeeRead)}
+                              />
+                            )}
+                        </span>
+                        <p className="min-w-0 flex-1 truncate text-xs text-slate-500">
+                          {latest?.author === "AGENT" ? "Nexo: " : ""}
+                          {latest?.content ?? "Nova conversa"}
+                        </p>
+                      </>
+                    )}
+                    <span className="ml-auto">
+                      <UnreadBadge count={c.activity.unreadCount} />
+                    </span>
+                  </div>
+                  <p
+                    className={`flex items-center gap-1 text-[11px] ${statusColor(c.status)}`}
+                  >
+                    <span className="size-1.5 rounded-full bg-current" />
+                    {c.status === "WAITING_ANALYST"
+                      ? "Transferida"
+                      : c.status === "AGENT_ACTIVE"
+                        ? "Agent atendendo"
+                        : labels[c.status]}
+                  </p>
                 </div>
-                <p className="my-1 truncate text-xs text-slate-500">
-                  {c.messages[0]?.content ?? "Nova conversa"}
-                </p>
-                <span
-                  className={`text-xs ${c.status === "WAITING_ANALYST" ? "text-amber-700" : "text-blue-700"}`}
-                >
-                  {labels[c.status]}
-                </span>
-              </div>
-            </button>
-          ))}
+              </Button>
+            )
+          })}
           {!visible.length && (
             <p className="p-5 text-sm text-slate-500">
               Nenhuma conversa neste filtro.
@@ -296,37 +413,41 @@ export function AnalystConsole({
           </div>
         ) : (
           <>
-            <header className="flex flex-wrap items-center justify-between gap-3 border-b bg-white px-5 py-4">
-              <div className="flex items-center gap-2">
+            <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#e8ebef] bg-white px-5 py-2">
+              <div className="flex min-w-0 items-center gap-3">
                 <Button
                   className="md:hidden"
                   variant="ghost"
                   size="icon"
                   aria-label="Voltar à fila"
                   onClick={() => {
+                    stopTyping()
                     setSelected(null)
                     setDetail(null)
                   }}
                 >
                   <ArrowLeft />
                 </Button>
+                <PresenceAvatar
+                  name={detail.employee.name}
+                  online={detail.activity.employee.online}
+                />
                 <div>
-                  <h2 className="font-semibold">{detail.employee.name}</h2>
-                  <p className="text-xs text-slate-500">
-                    {labels[detail.status]}
-                    {detail.assignedAnalyst
-                      ? ` · ${detail.assignedAnalyst.name}`
-                      : ""}
-                  </p>
+                  <h2 className="text-sm font-semibold">
+                    {detail.employee.name}
+                  </h2>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    {detail.activity.employee.typing ? (
+                      <TypingIndicator />
+                    ) : (
+                      <>
+                        {detail.activity.employee.online ? "online" : "offline"}
+                        {linked ? ` · ${linked.number}` : ""}
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
-              <Button
-                variant="outline"
-                className="xl:hidden"
-                onClick={() => setShowTickets(!showTickets)}
-              >
-                Chamados
-              </Button>
               {owned && (
                 <div className="flex gap-2">
                   <Button
@@ -334,6 +455,7 @@ export function AnalystConsole({
                     disabled={busy}
                     onClick={() => void act("return")}
                   >
+                    <Bot />
                     Devolver ao agent
                   </Button>
                   <Button
@@ -341,83 +463,147 @@ export function AnalystConsole({
                     disabled={busy}
                     onClick={() => setClosing(true)}
                   >
-                    Encerrar
+                    <CircleCheckBig size={20} />
+                    Encerrar atendimento
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={busy}
+                    //onClick={() => setShowTickets(true)}
+                  >
+                    <EllipsisVertical size={20} />
                   </Button>
                 </div>
               )}
             </header>
             <div
-              className="flex-1 space-y-4 overflow-y-auto p-5"
+              className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 xl:px-10"
               aria-label="Histórico da conversa"
+              onScroll={(e) => {
+                const el = e.currentTarget
+                nearBottom.current =
+                  el.scrollHeight - el.scrollTop - el.clientHeight < 100
+              }}
             >
-              <div className="rounded-xl border border-blue-100 bg-white p-4 text-sm">
-                <strong>Contexto do atendimento</strong>
-                <p className="mt-2 whitespace-pre-wrap text-slate-600">
-                  {detail.handoff?.summary ??
-                    "Conversa ainda com o assistente."}
-                </p>
-                {detail.drafts.map((d) => (
-                  <p key={d.id} className="mt-2 text-amber-800">
-                    Rascunho aguardando confirmação:{" "}
-                    {String(
-                      (d.payload as { title?: string }).title ?? "Chamado"
-                    )}{" "}
-                    ·{" "}
-                    {labels[
-                      String((d.payload as { priority?: string }).priority)
-                    ] ?? ""}
+              {detail.handoff && (
+                <details className="rounded-lg border border-slate-200 bg-white/70 p-3 text-xs text-slate-600">
+                  <summary className="cursor-pointer font-medium">
+                    Contexto do atendimento
+                  </summary>
+                  <p className="mt-2 whitespace-pre-wrap">
+                    {detail.handoff.summary}
                   </p>
-                ))}
-              </div>
-              {detail.messages.map((m) =>
-                m.author === "SYSTEM" ? (
-                  <p
-                    key={m.id}
-                    className="py-2 text-center text-xs text-slate-500"
-                  >
-                    {m.content}
-                  </p>
-                ) : (
-                  <div
-                    key={m.id}
-                    className={`flex ${m.author === "EMPLOYEE" ? "justify-start" : "justify-end"}`}
-                  >
-                    <div
-                      className={`max-w-[85%] rounded-xl p-3 text-sm ${m.author === "EMPLOYEE" ? "bg-white" : m.author === "ANALYST" ? "bg-emerald-100" : "bg-[#0064ce] text-white"}`}
-                    >
-                      <p className="mb-1 text-xs opacity-70">
-                        {m.author === "AGENT"
-                          ? "Nexo Assist"
-                          : (m.authorUser?.name ?? detail.employee.name)}{" "}
-                        · {time(m.createdAt)}
+                  {detail.drafts.map((d) => (
+                    <p key={d.id} className="mt-2 text-amber-800">
+                      Rascunho pendente:{" "}
+                      {String(
+                        (d.payload as { title?: string }).title ?? "Chamado"
+                      )}
+                    </p>
+                  ))}
+                </details>
+              )}
+              {detail.messages.map((m, index) => (
+                <Fragment key={m.id}>
+                  {(index === 0 ||
+                    new Date(
+                      detail.messages[index - 1]!.createdAt
+                    ).toDateString() !==
+                      new Date(m.createdAt).toDateString()) && (
+                    <div className="flex justify-center py-2">
+                      <span className="rounded-full bg-white/80 px-3 py-1 text-[11px] text-slate-500">
+                        {new Date(m.createdAt).toLocaleDateString("pt-BR")}
+                      </span>
+                    </div>
+                  )}
+                  {m.author === "SYSTEM" ? (
+                    <div className="py-2 text-center text-xs text-slate-500">
+                      <p className="flex items-center justify-center gap-2">
+                        <ArrowLeftRight className="size-3 shrink-0" />
+                        {m.content}
                       </p>
-                      <p className="whitespace-pre-wrap">{m.content}</p>
+                      <DecisionPanel decision={m.decision} />
+                    </div>
+                  ) : (
+                    <div
+                      className={`flex ${m.author === "EMPLOYEE" ? "justify-start" : "justify-end"}`}
+                    >
+                      <div className="max-w-[90%] md:max-w-[85%]">
+                        {m.author !== "EMPLOYEE" && (
+                          <p className="mb-1 text-right text-[11px] text-slate-600">
+                            {m.author === "AGENT"
+                              ? "Nexo Assist"
+                              : (m.authorUser?.name ?? "Analista")}
+                            {m.author === "AGENT" && (
+                              <span className="ml-2 rounded bg-[#dceafa] px-1 text-[10px] font-semibold text-[#0064ce]">
+                                IA
+                              </span>
+                            )}
+                          </p>
+                        )}
+                        <div
+                          className={`rounded-xl px-3 py-2 text-sm shadow-[0_1px_2px_#1c263308] ${m.author === "EMPLOYEE" ? "rounded-tl-sm bg-white" : m.author === "ANALYST" ? "rounded-tr-sm bg-[#e1f3e9]" : "rounded-tr-sm bg-[#e5effb]"}`}
+                        >
+                          <p className="[overflow-wrap:anywhere] whitespace-pre-wrap">
+                            {m.content}
+                          </p>
+                          <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-500">
+                            <time>{time(m.createdAt)}</time>
+                            {["AGENT", "ANALYST"].includes(m.author) && (
+                              <MessageReceipt
+                                read={wasRead(m, detail.activity.employeeRead)}
+                              />
+                            )}
+                          </div>
+                        </div>
+                        <DecisionPanel
+                          decision={m.decision}
+                          unavailable={m.author === "AGENT"}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </Fragment>
+              ))}
+              {detail.activity.employee.typing && (
+                <div className="w-fit rounded-xl bg-white px-3 py-2">
+                  <TypingIndicator name={detail.employee.name.split(" ")[0]} />
+                </div>
+              )}
+              <div ref={historyEnd} className="h-px" />
+            </div>
+            <footer className="shrink-0 border-t border-[#e8ebef] bg-white p-4">
+              {waiting && (
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="rounded-full bg-[#fff7e8] p-2 text-amber-700">
+                      <Hand className="size-4" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-medium">
+                        {detail.employee.name.split(" ")[0]} espera um atendente
+                      </p>
+                      <p className="text-xs text-slate-500">Agent pausado</p>
                     </div>
                   </div>
-                )
-              )}
-              <div ref={historyEnd} />
-            </div>
-            <footer className="border-t bg-white p-4">
-              {waiting && (
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm">
-                  <p>Aguardando um atendente · Agent pausado</p>
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
                       disabled={busy}
                       onClick={() => void act("return")}
                     >
+                      <Bot />
                       Devolver ao agent
                     </Button>
                     <Button disabled={busy} onClick={() => void act("claim")}>
+                      <Headphones />
                       Assumir atendimento
                     </Button>
                   </div>
                 </div>
               )}
               <form
-                className="flex items-end gap-3"
+                className="flex items-end gap-3 "
                 onSubmit={(e) => {
                   e.preventDefault()
                   void act("reply")
@@ -425,6 +611,8 @@ export function AnalystConsole({
               >
                 <Textarea
                   aria-label="Resposta ao funcionário"
+                  rows={1}
+                  className="[field-sizing-content] max-h-40 min-h-12 resize-none overflow-y-auto border-0 bg-[#f7f8fa] px-3 py-3 leading-6 shadow-none"
                   placeholder={
                     owned
                       ? "Escreva sua resposta…"
@@ -433,80 +621,36 @@ export function AnalystConsole({
                   value={reply}
                   maxLength={4000}
                   disabled={!owned || busy}
-                  onChange={(e) => setReply(e.target.value)}
+                  onChange={(e) => {
+                    setReply(e.target.value)
+                    reportTyping(!!e.target.value.trim())
+                  }}
+                  onBlur={stopTyping}
                 />
                 <Button
                   type="submit"
                   size="icon"
+                  className="rounded-full"
                   aria-label="Enviar resposta"
                   disabled={!owned || busy || !reply.trim()}
                 >
-                  <ArrowUp />
+                  <SendHorizonal  />
                 </Button>
               </form>
             </footer>
           </>
         )}
       </section>
-      {detail && (
-        <aside
-          className={`${showTickets ? "fixed inset-y-0 right-0 z-20 block w-80 bg-white shadow-xl" : "hidden w-72"} shrink-0 overflow-y-auto border-l p-5 xl:static xl:block xl:w-72 xl:shadow-none`}
-        >
-          <Button
-            className="mb-3 xl:hidden"
-            variant="outline"
-            onClick={() => setShowTickets(false)}
-          >
-            Fechar chamados
-          </Button>
-          <h2 className="font-semibold">
-            Chamados de {detail.employee.name.split(" ")[0]}
-          </h2>
-          <p className="mt-1 mb-5 text-xs text-slate-500">
-            {detail.tickets.length} chamados registrados
-          </p>
-          {[...detail.tickets]
-            .sort(
-              (a, b) =>
-                Number(b.number === linked?.number) -
-                Number(a.number === linked?.number)
-            )
-            .map((t) => (
-              <article key={t.id} className="mb-4 rounded-xl border p-4">
-                {t.number === linked?.number && (
-                  <p className="mb-2 text-xs text-blue-600">
-                    Associado à conversa
-                  </p>
-                )}
-                <strong className="text-sm">{t.number}</strong>
-                <p className="my-2 text-sm">{t.title}</p>
-                <div className="flex flex-wrap gap-1">
-                  <Badge variant="secondary">{labels[t.status]}</Badge>
-                  <Badge variant="outline">{labels[t.priority]}</Badge>
-                </div>
-                <p className="mt-2 text-xs text-slate-500">
-                  {categoryLabels[t.category]}
-                </p>
-                {t.nextResponseDueAt && (
-                  <p className="mt-2 text-xs">
-                    Prazo:{" "}
-                    {new Date(t.nextResponseDueAt).toLocaleString("pt-BR")}
-                  </p>
-                )}
-                <details className="mt-3 text-xs">
-                  <summary className="cursor-pointer text-blue-600">
-                    Histórico do chamado
-                  </summary>
-                  {t.events.map((e) => (
-                    <p key={e.id} className="mt-2 border-t pt-2">
-                      {new Date(e.createdAt).toLocaleString("pt-BR")} ·{" "}
-                      {eventLabels[e.action] ?? e.action}
-                    </p>
-                  ))}
-                </details>
-              </article>
-            ))}
-        </aside>
+      {detail && !ticketsHidden && (
+        <AnalystTickets
+          key={detail.employee.id}
+          detail={detail}
+          showTickets={showTickets}
+          onClose={() => {
+            setShowTickets(false)
+            setTicketsHidden(true)
+          }}
+        />
       )}
       <Dialog open={closing} onOpenChange={setClosing}>
         <DialogContent>

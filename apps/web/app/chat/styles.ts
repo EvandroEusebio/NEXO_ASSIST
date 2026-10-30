@@ -8,14 +8,14 @@ export const styles = {
   nav: "grid gap-1 max-[700px]:flex max-[700px]:text-xs",
   navItem:
     "flex items-center gap-2.5 rounded-lg px-2.5 py-[9px] text-left text-[#3d4656]",
-  active: "bg-accent font-medium text-accent-foreground max-[700px]:hidden",
+  active: "bg-accent font-medium text-accent-foreground ",
   history:
-    "mt-6 grid gap-2.5 max-[700px]:col-span-2 max-[700px]:m-0 max-[700px]:flex max-[700px]:items-center",
+    "my-2 flex min-w-0 flex-wrap items-center gap-2.5 max-[700px]:col-span-2 max-[700px]:m-0 max-[700px]:flex max-[700px]:items-center",
   historyButton:
     "flex items-center gap-2.5 rounded-lg border border-border px-2.5 py-[9px] text-left text-[#3d4656] max-[700px]:shrink-0 max-[700px]:p-[7px] max-[700px]:text-xs",
   historyLabel: "mt-2.5 text-xs text-muted-foreground max-[700px]:hidden",
   historySelect:
-    "w-full rounded-md border border-border p-2 text-xs max-[700px]:min-w-0 max-[700px]:flex-1",
+    "min-w-0 max-w-full flex-1 rounded-md border border-border p-2 text-xs [&>span]:truncate max-[700px]:min-w-0 max-[700px]:flex-1",
   account: "mt-auto border-t border-border pt-3.5 max-[700px]:hidden",
   identity: "mb-3 flex items-center gap-2.5",
   identityName: "text-[13px] font-medium",
@@ -36,14 +36,14 @@ export const styles = {
     "rounded-full bg-[#fff6e5] px-2.5 py-1 text-xs whitespace-nowrap text-[#946300] max-[700px]:text-[10px]",
   scroll: "min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]",
   messages:
-    "mx-auto w-[calc(100%_-_48px)] max-w-[808px] pt-[72px] pb-3.5 max-[1050px]:pt-[30px] max-[700px]:w-[calc(100%_-_28px)] max-[700px]:pt-3",
+    "mx-auto w-[calc(100%_-_48px)] max-w-[808px] pt-[40px] pb-3.5 max-[1050px]:pt-[30px] max-[700px]:w-[calc(100%_-_28px)] max-[700px]:pt-3",
   welcome: "py-10",
   welcomeTitle: "mb-3 text-[28px]",
   welcomeDescription: "mb-5 leading-[1.6] text-muted-foreground",
   employeeMessage: "my-5 flex justify-end",
   assistantMessage: "my-[18px]",
   bubble:
-    "max-w-[600px] rounded-[0_14px_14px_14px] border border-border px-4 py-3 leading-[22px] whitespace-pre-wrap [overflow-wrap:anywhere] max-[700px]:text-[13px]",
+    "max-w-[600px] rounded-[3px_14px_14px_14px] border border-border px-4 py-3 leading-[22px] whitespace-pre-wrap [overflow-wrap:anywhere] max-[700px]:text-[13px]",
   employeeBubble:
     "max-w-[520px] rounded-[14px_14px_3px_14px] border-[#1b2431] bg-[#1b2431] text-white",
   messageLabel: "mb-1 flex flex-wrap items-center gap-3.5 text-xs",
@@ -81,7 +81,7 @@ export const styles = {
   composer:
     "flex items-center gap-2 rounded-xl border border-border bg-white p-[5px] focus-within:border-ring",
   composerInput:
-    "max-h-[10px] min-h-9 min-w-0 flex-1 resize-y rounded-none border-0 bg-transparent px-2.5 py-[7px] shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 ",
+    "max-h-28 min-h-9 min-w-0 flex-1 resize-y rounded-none border-0 bg-transparent px-2.5 py-[7px] shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 ",
   counter: "mt-[5px] text-right text-xs text-muted-foreground",
   notice:
     "my-2.5 rounded-lg bg-[#fff6e5] px-3 py-2.5 text-[13px] text-[#946300]",

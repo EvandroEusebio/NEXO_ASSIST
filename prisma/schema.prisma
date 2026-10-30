@@ -71,46 +71,50 @@ enum DraftStatus {
 }
 
 model User {
-  id                    String         @id @default(uuid()) @db.Uuid
-  name                  String         @db.VarChar(160)
-  email                 String         @unique @db.VarChar(320)
-  role                  UserRole       @default(EMPLOYEE)
-  demoLoginEnabled      Boolean        @default(false)
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
-  conversations         Conversation[] @relation("EmployeeConversations")
-  assignedConversations Conversation[] @relation("AnalystConversations")
-  openedTickets         Ticket[]       @relation("OpenedTickets")
-  affectedTickets       Ticket[]       @relation("AffectedTickets")
+  id                    String                  @id @default(uuid()) @db.Uuid
+  name                  String                  @db.VarChar(160)
+  email                 String                  @unique @db.VarChar(320)
+  role                  UserRole                @default(EMPLOYEE)
+  demoLoginEnabled      Boolean                 @default(false)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  conversations         Conversation[]          @relation("EmployeeConversations")
+  assignedConversations Conversation[]          @relation("AnalystConversations")
+  openedTickets         Ticket[]                @relation("OpenedTickets")
+  affectedTickets       Ticket[]                @relation("AffectedTickets")
   authoredMessages      Message[]
   ticketEvents          TicketEvent[]
   authSessions          AuthSession[]
+  conversationReads     ConversationReadState[]
 }
 
 model AuthSession {
-  tokenHash String   @id @db.VarChar(64)
-  userId    String   @db.Uuid
+  tokenHash String          @id @db.VarChar(64)
+  userId    String          @db.Uuid
   expiresAt DateTime
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  presence  PresenceLease[]
 
   @@index([userId])
   @@index([expiresAt])
 }
 
 model Conversation {
-  id                String             @id @default(uuid()) @db.Uuid
-  employeeId        String             @db.Uuid
-  assignedAnalystId String?            @db.Uuid
-  status            ConversationStatus @default(AGENT_ACTIVE)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  id                String                  @id @default(uuid()) @db.Uuid
+  employeeId        String                  @db.Uuid
+  assignedAnalystId String?                 @db.Uuid
+  status            ConversationStatus      @default(AGENT_ACTIVE)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
   closedAt          DateTime?
-  revision          Int                @default(0)
-  employee          User               @relation("EmployeeConversations", fields: [employeeId], references: [id], onDelete: Restrict)
-  assignedAnalyst   User?              @relation("AnalystConversations", fields: [assignedAnalystId], references: [id], onDelete: SetNull)
+  revision          Int                     @default(0)
+  employee          User                    @relation("EmployeeConversations", fields: [employeeId], references: [id], onDelete: Restrict)
+  assignedAnalyst   User?                   @relation("AnalystConversations", fields: [assignedAnalystId], references: [id], onDelete: SetNull)
   messages          Message[]
   drafts            TicketDraft[]
+  reads             ConversationReadState[]
+  presence          PresenceLease[]
 
   @@index([employeeId, createdAt])
   @@index([status, updatedAt])
@@ -209,4 +213,33 @@ model TicketEvent {
   actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([ticketId, createdAt])
+}
+
+// One lease per browser tab and authenticated session. Expiration is authoritative.
+model PresenceLease {
+  sessionTokenHash String        @db.VarChar(64)
+  tabId            String        @db.Uuid
+  sequence         Int
+  conversationId   String?       @db.Uuid
+  expiresAt        DateTime
+  typingUntil      DateTime?
+  session          AuthSession   @relation(fields: [sessionTokenHash], references: [tokenHash], onDelete: Cascade)
+  conversation     Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@id([sessionTokenHash, tabId])
+  @@index([expiresAt])
+  @@index([conversationId, typingUntil])
+}
+
+// A monotonic cursor: only messages actually rendered by this reader are acknowledged.
+model ConversationReadState {
+  conversationId    String       @db.Uuid
+  userId            String       @db.Uuid
+  lastReadAt        DateTime
+  lastReadMessageId String       @db.Uuid
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId])
 }

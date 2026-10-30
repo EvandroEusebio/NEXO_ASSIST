@@ -1,3 +1,5 @@
+import { conversationActivity } from "./activity"
+import { decisionSelect, publicMessage, decisionReason } from "./decisions"
 import { z } from "zod"
 import { Prisma, type PrismaClient } from "../generated/prisma/client"
 import {
@@ -122,7 +124,10 @@ export function createConversationService(
         const conversation = await tx.conversation.findFirst({
           where: { id, employeeId },
           include: {
-            messages: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+            messages: {
+              orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+              include: { decision: { select: decisionSelect } },
+            },
             drafts: {
               orderBy: { createdAt: "asc" },
               include: { targetTicket: { select: { number: true } } },
@@ -138,6 +143,12 @@ export function createConversationService(
         })
         return {
           ...conversation,
+          messages: conversation.messages.map(publicMessage),
+          activity: (
+            await conversationActivity(tx, employeeId, "EMPLOYEE", [
+              conversation,
+            ])
+          ).get(id)!,
           tickets,
           messageCount: conversation.messages.filter(
             (m) => m.author === "EMPLOYEE"
@@ -164,11 +175,18 @@ export function createConversationService(
           },
         },
       })
+      const activity = await conversationActivity(
+        db,
+        employeeId,
+        "EMPLOYEE",
+        conversations
+      )
       return conversations.map((c) => ({
         id: c.id,
         status: c.status,
         updatedAt: c.updatedAt,
         title: c.messages[0]?.content.slice(0, 70) ?? "Nova conversa",
+        unreadCount: activity.get(c.id)!.unreadCount,
       }))
     },
     async create(employeeId: string, input: unknown) {
@@ -399,7 +417,8 @@ export function createConversationService(
           })
           const reply = (
             content: string,
-            metadata: Prisma.InputJsonObject = {}
+            metadata: Prisma.InputJsonObject = {},
+            effectiveAction?: string
           ) =>
             tx.message.create({
               data: {
@@ -425,13 +444,24 @@ export function createConversationService(
                         create: {
                           intent: run.plan.intent,
                           action: String(
-                            metadata.kind ?? command?.type ?? "clarify"
+                            effectiveAction ??
+                              metadata.kind ??
+                              command?.type ??
+                              "clarify"
                           ),
                           confidence: run.plan.confidence,
-                          reasonSummary: run.plan.reason,
-                          evidenceSummary: metadata.sourceIds
-                            ? JSON.stringify(metadata.sourceIds)
-                            : null,
+                          reasonSummary: decisionReason(
+                            run.plan.reason,
+                            run.plan.intent,
+                            effectiveAction
+                          ),
+                          evidenceSummary: metadata.sourceTitles
+                            ? JSON.stringify({
+                                articles: metadata.sourceTitles,
+                              })
+                            : metadata.sourceIds
+                              ? JSON.stringify(metadata.sourceIds)
+                              : null,
                           resultSummary: content.slice(0, 500),
                         },
                       },
@@ -452,18 +482,36 @@ export function createConversationService(
               reason,
               number
             )
-            if (message && run)
+            if (message) {
+              await tx.message.update({
+                where: { id: message.id },
+                data: {
+                  metadata: {
+                    ...(message.metadata as Prisma.InputJsonObject),
+                    decisionSource: run ? "model" : "rule",
+                    ...(run ? { agent: { tool: run.tool } } : {}),
+                  },
+                },
+              })
               await tx.agentDecision.create({
                 data: {
                   messageId: message.id,
-                  intent: run.plan.intent,
+                  intent: run?.plan.intent ?? "handoff",
                   action: "handoff",
-                  confidence: run.plan.confidence,
-                  reasonSummary: run.plan.reason,
+                  confidence: run?.plan.confidence ?? null,
+                  reasonSummary:
+                    reason === "UNCERTAIN"
+                      ? "A confiança estimada ficou abaixo de 65%; o atendimento requer avaliação humana."
+                      : reason === "CRITICAL"
+                        ? "A prioridade crítica exige acompanhamento de um analista."
+                        : reason === "OVERDUE"
+                          ? "O prazo de resposta do chamado venceu; o atendimento foi encaminhado ao analista."
+                          : "O funcionário pediu atendimento humano.",
                   evidenceSummary: reason,
                   resultSummary: message.content,
                 },
               })
+            }
           }
           type ExistingTicket = {
             status: import("../generated/prisma/enums").TicketStatus
@@ -513,7 +561,8 @@ export function createConversationService(
                 kind: "draft",
                 draftId: draft.id,
                 activity: `preparou ${operation === "REOPEN" ? "uma reabertura" : "um complemento"} para confirmação`,
-              }
+              },
+              operation === "REOPEN" ? "prepare-reopen" : "prepare-update"
             )
             if (ticket.priority === "CRITICAL")
               await escalate("CRITICAL", ticket.number)
@@ -593,7 +642,8 @@ export function createConversationService(
             ) {
               await reply(
                 "Este chamado não pode ser reaberto: está encerrado ou foi resolvido há mais de 7 dias. Pode pedir atendimento a um analista.",
-                { kind: "clarify" }
+                { kind: "clarify" },
+                "reopen-blocked"
               )
               return
             }
@@ -675,7 +725,8 @@ export function createConversationService(
                       ({ ticket }) => ticket.number
                     ),
                     activity: "procurou chamados semelhantes",
-                  }
+                  },
+                  "select-ticket"
                 )
                 return
               }
@@ -688,7 +739,8 @@ export function createConversationService(
                 ) {
                   await reply(
                     `Já existe o chamado ${existing.number} para este problema. Consulte-o ou informe novos detalhes; não criei outro chamado.`,
-                    { kind: "ticket", number: existing.number }
+                    { kind: "ticket", number: existing.number },
+                    "existing-ticket"
                   )
                   return
                 }
@@ -717,7 +769,12 @@ export function createConversationService(
                 kind: "draft",
                 draftId: draft.id,
                 activity: "preparou o rascunho",
-              }
+              },
+              draft.operation === "CREATE"
+                ? "prepare-create"
+                : draft.operation === "REOPEN"
+                  ? "prepare-reopen"
+                  : "prepare-update"
             )
             if (
               (draft.payload as { priority?: string }).priority === "CRITICAL"
@@ -858,13 +915,18 @@ export function createConversationService(
                 kind: "help",
                 activity: "pesquisou a central de ajuda",
                 sourceIds: articles.map((article) => article.id),
+                sourceTitles: articles.map((article) => article.title),
               }
             )
           } else if (command?.type === "clarify") {
-            await reply(command.question, {
-              kind: "welcome",
-              activity: "pediu esclarecimento",
-            })
+            await reply(
+              command.question,
+              {
+                kind: "welcome",
+                activity: "pediu esclarecimento",
+              },
+              "clarify"
+            )
           } else if (command?.type === "help") {
             const articles = await tx.helpArticle.findMany({
               orderBy: { title: "asc" },

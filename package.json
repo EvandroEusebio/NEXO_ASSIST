@@ -26,7 +26,9 @@
     "chat:check:live": "tsx scripts/check-chat.ts --live",
     "agent:check": "tsx scripts/check-agent.ts",
     "agent:check:live": "tsx scripts/check-agent.ts --live",
-    "analyst:check": "tsx scripts/check-analyst.ts"
+    "analyst:check": "tsx scripts/check-analyst.ts",
+    "decisions:check": "tsx scripts/check-decisions.ts",
+    "activity:check": "tsx scripts/check-activity.ts"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",

@@ -1,27 +1,21 @@
 "use client"
-import { useEffect, useRef, useState, type FormEvent } from "react"
-import Link from "next/link"
+
+import { useConversationActivity } from "@/hooks/use-conversation-activity"
 import {
-  ArrowUp,
-  Check,
-  ChevronRight,
-  MessageSquare,
-  Plus,
-  UserRound,
-} from "lucide-react"
-import { LogoutButton } from "../tickets/logout-button"
+  MessageReceipt,
+  TypingIndicator,
+  UnreadBadge,
+} from "@/components/conversation-indicators"
+import { wasRead } from "../../../../src/contracts/activity"
+
+import { DecisionPanel } from "@/components/decision-panel"
+import { useEffect, useRef, useState, type FormEvent } from "react"
+import { EmployeeSidebar } from "@/components/employee-sidebar"
+import { ArrowUp, Check, ChevronRight, Plus } from "lucide-react"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import { Avatar, AvatarFallback } from "@workspace/ui/components/avatar"
 import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
 import { Card } from "@workspace/ui/components/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@workspace/ui/components/dialog"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 import {
@@ -92,7 +86,7 @@ function TicketCard({ ticket }: { ticket: ChatTicket }) {
         <span>Chamado · {ticket.number}</span>
         <Badge
           variant="secondary"
-          className={overdue ? styles.warning : undefined}
+          className={`border-0 bg-transparent p-0 font-normal ${overdue ? styles.warning : "text-muted-foreground"}`}
         >
           ● {statusLabels[ticket.status]}
         </Badge>
@@ -117,13 +111,12 @@ function TicketCard({ ticket }: { ticket: ChatTicket }) {
           <dd className={styles.factValue}>{date(ticket.createdAt)}</dd>
         </div>
         <div className={styles.fact}>
-          <dt className={styles.factLabel}>Próxima resposta</dt>
+          <dt className={styles.factLabel}>Última atualização</dt>
           <dd
             className={`${styles.factValue} ${overdue ? styles.warning : ""}`}
           >
-            {ticket.nextResponseDueAt
-              ? `${date(ticket.nextResponseDueAt)}${overdue ? " · prazo vencido" : ""}`
-              : "Prazo não definido"}
+            {date(ticket.updatedAt)}
+            {overdue ? " · prazo vencido" : ""}
           </dd>
         </div>
       </dl>
@@ -151,12 +144,18 @@ export function Chat({
   const currentId = useRef(initial?.id ?? null)
   const pending = useRef(false)
   const bottom = useRef<HTMLDivElement>(null)
-  const [profileOpen, setProfileOpen] = useState(false)
+  const nearBottom = useRef(true)
   const count = snapshot?.messageCount ?? 0
   const limited = count >= MESSAGE_LIMIT
   const human = snapshot && snapshot.status !== "AGENT_ACTIVE"
   const disabled = busy || limited || snapshot?.status === "CLOSED"
   const conversationId = snapshot?.id
+  const { reportTyping, stopTyping } = useConversationActivity({
+    conversationId,
+    latestMessageId: snapshot?.messages.at(-1)?.id,
+    canType: !disabled,
+    readSentinel: bottom,
+  })
 
   async function api<T>(url: string, body?: unknown): Promise<T> {
     const response = await fetch(
@@ -187,6 +186,31 @@ export function Chat({
       )
   }
   useEffect(() => {
+    const controller = new AbortController()
+    let refreshing = false
+    const refresh = async () => {
+      if (refreshing || document.visibilityState !== "visible") return
+      refreshing = true
+      try {
+        const response = await fetch("/api/conversations", {
+          signal: controller.signal,
+          cache: "no-store",
+        })
+        if (response.ok && !controller.signal.aborted)
+          setHistory((await response.json()).conversations)
+      } catch {
+        /* The SSE connection displays connectivity problems. */
+      } finally {
+        refreshing = false
+      }
+    }
+    const timer = setInterval(() => void refresh(), 3000)
+    return () => {
+      controller.abort()
+      clearInterval(timer)
+    }
+  }, [])
+  useEffect(() => {
     if (!conversationId) return
     const source = new EventSource(
       `/api/conversations/${conversationId}/events`
@@ -203,7 +227,7 @@ export function Chat({
     return () => source.close()
   }, [conversationId])
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+    if (nearBottom.current) bottom.current?.scrollIntoView({ block: "end" })
   }, [snapshot?.messages.length, editor])
 
   async function create() {
@@ -221,6 +245,8 @@ export function Chat({
   }
   async function newConversation() {
     if (pending.current) return
+    stopTyping()
+    nearBottom.current = true
     pending.current = true
     setBusy(true)
     setError("")
@@ -239,6 +265,8 @@ export function Chat({
   }
   async function selectConversation(id: string) {
     if (!id || pending.current) return
+    stopTyping()
+    nearBottom.current = true
     pending.current = true
     setBusy(true)
     setError("")
@@ -262,6 +290,7 @@ export function Chat({
     requestId = crypto.randomUUID()
   ) {
     if (pending.current || disabled) return
+    stopTyping()
     const payload = { content: text, action, requestId }
     pending.current = true
     setBusy(true)
@@ -342,7 +371,7 @@ export function Chat({
           </span>
           <Badge
             variant="secondary"
-            className={draft.status === "PENDING" ? styles.warning : undefined}
+            className={`border-0 bg-transparent p-0 font-normal ${draft.status === "PENDING" ? styles.warning : "text-muted-foreground"}`}
           >
             {draft.status === "PENDING"
               ? "● Aguardando confirmação"
@@ -429,89 +458,7 @@ export function Chat({
   }
   return (
     <main className={styles.screen}>
-      <aside className={styles.sidebar}>
-        <Link href="/chat" className={styles.brand}>
-          <svg
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            aria-hidden="true"
-          >
-            <path d="M2 4 7 1l12 10V3l5-2v19l-5 3L7 13v8l-5 2Z" />
-          </svg>
-          Nexo Assist
-        </Link>
-        <nav className={styles.nav}>
-          <Link href="/chat" className={`${styles.navItem} ${styles.active}`}>
-            <MessageSquare size={16} />
-            Atendimento
-          </Link>
-          <Link
-            className={styles.navItem}
-            href="#"
-            onClick={() => setProfileOpen(true)}
-          >
-            <UserRound size={16} />
-            Meu perfil
-          </Link>
-        </nav>
-        <div className={styles.history}>
-          <Button
-            className={styles.historyButton}
-            variant="outline"
-            disabled={busy}
-            onClick={() => void newConversation()}
-          >
-            <Plus size={16} />
-            Nova conversa
-          </Button>
-          <Label className={styles.historyLabel} htmlFor="conversation">
-            Histórico
-          </Label>
-          <Select
-            items={history.map((c) => ({ value: c.id, label: c.title }))}
-            value={snapshot?.id ?? null}
-            disabled={busy}
-            onValueChange={(value) => {
-              if (value) void selectConversation(value)
-            }}
-          >
-            <SelectTrigger
-              className={styles.historySelect}
-              id="conversation"
-              aria-label="Histórico de conversas"
-            >
-              <SelectValue placeholder="Selecione uma conversa" />
-            </SelectTrigger>
-            <SelectContent>
-              {history.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className={styles.account}>
-          <div className={styles.identity}>
-            <Avatar className={styles.avatar}>
-              <AvatarFallback className={styles.avatarFallback}>
-                {user.name
-                  .split(" ")
-                  .map((n) => n[0])
-                  .slice(0, 2)
-                  .join("")}
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <strong className={styles.identityName}>{user.name}</strong>
-              <small className={styles.identityEmail}>{user.email}</small>
-            </div>
-          </div>
-          <LogoutButton />
-        </div>
-      </aside>
+      <EmployeeSidebar user={user} active="chat" />
       <section className={styles.workspace}>
         <header className={styles.header}>
           <span className={styles.breadcrumb}>
@@ -525,13 +472,68 @@ export function Chat({
             {snapshot?.status === "CLOSED"
               ? "● Atendimento encerrado"
               : snapshot?.status === "ANALYST_ACTIVE"
-                ? "● Em atendimento com analista"
+                ? snapshot.activity.analyst.online
+                  ? "● Analista online"
+                  : "● Em atendimento com analista"
                 : human
                   ? "● Aguardando atendimento"
                   : "● Assistente online"}
           </Badge>
         </header>
-        <div className={styles.scroll}>
+        <details className="mx-auto w-[calc(100%_-_48px)] max-w-[808px] pt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer py-1">
+            Conversas e histórico
+          </summary>
+          <div className={styles.history}>
+            <Button
+              className={styles.historyButton}
+              variant="outline"
+              disabled={busy}
+              onClick={() => void newConversation()}
+            >
+              <Plus size={16} />
+              Nova conversa
+            </Button>
+            <Label className={styles.historyLabel} htmlFor="conversation">
+              Histórico
+            </Label>
+            <Select
+              items={history.map((c) => ({
+                value: c.id,
+                label: `${c.title}${c.unreadCount ? ` · ${c.unreadCount} não lidas` : ""}`,
+              }))}
+              value={snapshot?.id ?? null}
+              disabled={busy}
+              onValueChange={(value) => {
+                if (value) void selectConversation(value)
+              }}
+            >
+              <SelectTrigger
+                className={styles.historySelect}
+                id="conversation"
+                aria-label="Histórico de conversas"
+              >
+                <SelectValue placeholder="Selecione uma conversa" />
+              </SelectTrigger>
+              <SelectContent>
+                {history.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    <span>{c.title}</span>
+                    <UnreadBadge count={c.unreadCount} />
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </details>
+        <div
+          className={styles.scroll}
+          onScroll={(e) => {
+            const el = e.currentTarget
+            nearBottom.current =
+              el.scrollHeight - el.scrollTop - el.clientHeight < 100
+          }}
+        >
           <div
             className={styles.messages}
             role="log"
@@ -578,10 +580,10 @@ export function Chat({
                           ? "Analista"
                           : "Nexo Assist"}
                       </strong>
-                      {meta?.activity && (
+                      {(meta?.activity || message.decision?.action) && (
                         <span className={styles.messageActivity}>
                           <Check size={12} />
-                          {meta.activity}
+                          {meta?.activity ?? message.decision?.action}
                         </span>
                       )}
                     </div>
@@ -590,6 +592,19 @@ export function Chat({
                     className={`${styles.bubble} ${message.author === "EMPLOYEE" ? styles.employeeBubble : ""}`}
                   >
                     {message.content}
+                    {message.author === "EMPLOYEE" && (
+                      <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-300">
+                        <time>
+                          {new Date(message.createdAt).toLocaleTimeString(
+                            "pt-BR",
+                            { hour: "2-digit", minute: "2-digit" }
+                          )}
+                        </time>
+                        <MessageReceipt
+                          read={wasRead(message, snapshot.activity.analystRead)}
+                        />
+                      </div>
+                    )}
                   </div>
                   {meta?.kind === "welcome" && !human && quickOptions()}
                   {meta?.kind === "tickets" && (
@@ -621,12 +636,28 @@ export function Chat({
                               {t.title}
                             </strong>
                             <span className={styles.ticketMeta}>
+                              <span
+                                className={
+                                  t.status === "WAITING_ANALYST"
+                                    ? "text-amber-500"
+                                    : ["RESOLVED", "CLOSED"].includes(t.status)
+                                      ? "text-emerald-500"
+                                      : "text-primary"
+                                }
+                              >
+                                ●
+                              </span>{" "}
                               {statusLabels[t.status]}
-                              {t.nextResponseDueAt &&
-                              !["RESOLVED", "CLOSED"].includes(t.status)
-                                ? ` · ${date(t.nextResponseDueAt)}${new Date(t.nextResponseDueAt).getTime() < Date.now() ? " · vencido" : ""}`
-                                : ""}
                             </span>
+                            <time
+                              className={styles.ticketMeta}
+                              dateTime={t.createdAt}
+                            >
+                              {new Intl.DateTimeFormat("pt-PT", {
+                                day: "2-digit",
+                                month: "short",
+                              }).format(new Date(t.createdAt))}
+                            </time>
                           </Button>
                         ))}
                     </div>
@@ -662,6 +693,10 @@ export function Chat({
                       )}
                     </>
                   )}
+                  <DecisionPanel
+                    decision={message.decision}
+                    unavailable={message.author === "AGENT"}
+                  />
                   {latestDraft && renderDraft(draft)}
                 </div>
               )
@@ -699,7 +734,12 @@ export function Chat({
                 A processar…
               </p>
             )}
-            <div ref={bottom} />
+            {snapshot?.activity.analyst.typing && (
+              <div className="py-2">
+                <TypingIndicator name="Analista" />
+              </div>
+            )}
+            <div ref={bottom} className="h-px" />
           </div>
         </div>
         <div className={styles.composerArea}>
@@ -760,7 +800,11 @@ export function Chat({
               value={content}
               maxLength={4000}
               disabled={disabled}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => {
+                setContent(e.target.value)
+                reportTyping(!!e.target.value.trim())
+              }}
+              onBlur={stopTyping}
               onKeyDown={(e) => {
                 if (
                   e.key === "Enter" &&
@@ -787,20 +831,6 @@ export function Chat({
           </div>
         </div>
       </section>
-      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
-        <DialogContent className={styles.dialog}>
-          <DialogHeader>
-            <DialogTitle className={styles.dialogTitle}>Meu perfil</DialogTitle>
-            <DialogDescription>Informações da conta em uso.</DialogDescription>
-          </DialogHeader>
-          <p className={styles.dialogText}>{user.name}</p>
-          <p className={styles.dialogText}>{user.email}</p>
-          <Link className={styles.dialogLink} href="/tickets">
-            Ver meus chamados
-          </Link>
-          <LogoutButton />
-        </DialogContent>
-      </Dialog>
     </main>
   )
 }
