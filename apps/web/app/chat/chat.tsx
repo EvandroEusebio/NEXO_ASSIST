@@ -148,7 +148,15 @@ export function Chat({
   const count = snapshot?.messageCount ?? 0
   const limited = count >= MESSAGE_LIMIT
   const human = snapshot && snapshot.status !== "AGENT_ACTIVE"
+  const analystActive = snapshot?.status === "ANALYST_ACTIVE"
+  const analystOnline = analystActive && snapshot.activity.analyst.online
   const disabled = busy || limited || snapshot?.status === "CLOSED"
+  const incoming = history.find(
+    (c) =>
+      c.id !== snapshot?.id &&
+      c.status === "ANALYST_ACTIVE" &&
+      c.unreadCount > 0
+  )
   const conversationId = snapshot?.id
   const { reportTyping, stopTyping } = useConversationActivity({
     conversationId,
@@ -467,14 +475,20 @@ export function Chat({
           </span>
           <Badge
             variant="secondary"
-            className={human ? styles.waitingBadge : styles.online}
+            className={
+              snapshot?.status === "CLOSED" || (analystActive && !analystOnline)
+                ? styles.offline
+                : snapshot?.status === "WAITING_ANALYST"
+                  ? styles.waitingBadge
+                  : styles.online
+            }
           >
             {snapshot?.status === "CLOSED"
               ? "● Atendimento encerrado"
               : snapshot?.status === "ANALYST_ACTIVE"
-                ? snapshot.activity.analyst.online
+                ? analystOnline
                   ? "● Analista online"
-                  : "● Em atendimento com analista"
+                  : "● Analista offline"
                 : human
                   ? "● Aguardando atendimento"
                   : "● Assistente online"}
@@ -580,6 +594,24 @@ export function Chat({
                           ? "Analista"
                           : "Nexo Assist"}
                       </strong>
+                      {message.author === "ANALYST" &&
+                        analystActive &&
+                        message.authorUserId === snapshot.assignedAnalystId && (
+                          <span
+                            aria-label={
+                              analystOnline
+                                ? "Analista online"
+                                : "Analista offline"
+                            }
+                            className={`inline-flex items-center gap-1.5 text-[11px] ${analystOnline ? "text-[#00804a]" : "text-muted-foreground"}`}
+                          >
+                            <span
+                              aria-hidden="true"
+                              className={`size-1.5 rounded-full ${analystOnline ? "bg-[#00bd78]" : "bg-slate-400"}`}
+                            />
+                            {analystOnline ? "online" : "offline"}
+                          </span>
+                        )}
                       {(meta?.activity || message.decision?.action) && (
                         <span className={styles.messageActivity}>
                           <Check size={12} />
@@ -743,6 +775,34 @@ export function Chat({
           </div>
         </div>
         <div className={styles.composerArea}>
+          {incoming && (
+            <div
+              className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[13px]"
+              role="status"
+            >
+              <span>Um analista iniciou um atendimento consigo.</span>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => void selectConversation(incoming.id)}
+              >
+                Abrir atendimento
+              </Button>
+            </div>
+          )}
+          {snapshot?.status === "CLOSED" && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[13px] text-muted-foreground">
+              <span>Este atendimento foi encerrado.</span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => void newConversation()}
+              >
+                Iniciar nova conversa
+              </Button>
+            </div>
+          )}
           {reconnecting && (
             <p className={styles.notice} role="status">
               A restabelecer as atualizações da conversa…

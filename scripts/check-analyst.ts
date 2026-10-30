@@ -189,6 +189,96 @@ async function main() {
       requestId: randomUUID(),
     })
   )
+  const restart = {
+    action: "start",
+    requestId: randomUUID(),
+    revision: detail.revision,
+  }
+  await assert.rejects(analysts.start(employee, id, restart), { status: 403 })
+  const beforeStart = await db.conversation.count({
+    where: { employeeId: employee },
+  })
+  const reopened = await analysts.start(owner, id, restart)
+  assert.notEqual(reopened.id, id)
+  assert.equal(reopened.status, "ANALYST_ACTIVE")
+  assert.equal(reopened.assignedAnalystId, owner)
+  assert.equal(reopened.employeeId, employee)
+  assert.equal((await analysts.detail(owner, id)).status, "CLOSED")
+  assert.equal(
+    (await db.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).status,
+    "RESOLVED",
+    "Starting a conversation must not reopen a resolved ticket"
+  )
+  assert.equal(
+    (await analysts.start(owner, id, restart)).id,
+    reopened.id,
+    "Retries must return the same conversation"
+  )
+  assert.equal(
+    await db.conversation.count({ where: { employeeId: employee } }),
+    beforeStart + 1
+  )
+  await assert.rejects(
+    analysts.start(owner, reopened.id, {
+      action: "start",
+      requestId: randomUUID(),
+      revision: reopened.revision,
+    }),
+    { status: 409 }
+  )
+  const closedSource = await analysts.detail(owner, id)
+  await assert.rejects(
+    analysts.start(other, id, {
+      action: "start",
+      requestId: randomUUID(),
+      revision: closedSource.revision,
+    }),
+    { status: 409 }
+  )
+  const employeeView = await conversations.snapshot(employee, reopened.id)
+  assert.equal(
+    employeeView.activity.unreadCount,
+    1,
+    "The invitation must notify the employee"
+  )
+  state = await conversations.send(employee, reopened.id, {
+    content: "Olá, podemos continuar.",
+    requestId: randomUUID(),
+  })
+  assert.equal(state.messages.at(-1)?.author, "EMPLOYEE")
+  const startedReply = await analysts.detail(owner, reopened.id)
+  const finishedNew = await analysts.act(owner, reopened.id, {
+    action: "reply",
+    content: "Sim, estou a acompanhar.",
+    requestId: randomUUID(),
+    revision: startedReply.revision,
+  })
+  const closedNew = await analysts.act(owner, reopened.id, {
+    action: "close",
+    requestId: randomUUID(),
+    revision: finishedNew.revision,
+  })
+  const startRace = await Promise.allSettled(
+    [owner, other].map((user) =>
+      analysts.start(user, reopened.id, {
+        action: "start",
+        requestId: randomUUID(),
+        revision: closedNew.revision,
+      })
+    )
+  )
+  assert.equal(
+    startRace.filter((r) => r.status === "fulfilled").length,
+    1,
+    "Concurrent starts must create only one conversation"
+  )
+  const winner = startRace.find((r) => r.status === "fulfilled")!
+  if (winner.status === "fulfilled")
+    await analysts.act(winner.value.assignedAnalystId!, winner.value.id, {
+      action: "close",
+      requestId: randomUUID(),
+      revision: winner.value.revision,
+    })
   for (const reason of ["CRITICAL", "OVERDUE", "UNCERTAIN"] as const) {
     const cid = randomUUID()
     await conversations.create(employee, { id: cid })
@@ -270,7 +360,7 @@ async function main() {
     "WAITING_ANALYST"
   )
   console.log(
-    "Transferências, contexto, pausa, concorrência, permissões, resposta, SLA, devolução e encerramento: OK"
+    "Transferências, contexto, pausa, concorrência, permissões, resposta, SLA, devolução, encerramento e novo atendimento: OK"
   )
 }
 main()

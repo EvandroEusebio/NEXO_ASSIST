@@ -141,7 +141,7 @@ export function AnalystConsole({
   useEffect(() => {
     if (nearBottom.current) historyEnd.current?.scrollIntoView({ block: "end" })
   }, [detail?.id, detail?.messages.length])
-  async function act(action: "claim" | "reply" | "return" | "close") {
+  async function act(action: "claim" | "reply" | "return" | "close" | "start") {
     if (!detail || lock.current) return
     lock.current = true
     stopTyping()
@@ -169,6 +169,12 @@ export function AnalystConsole({
         throw new Error(result.error)
       }
       retry.current = null
+      if (action === "start") {
+        nearBottom.current = true
+        setSelected(result.id)
+        setFilter("all")
+        setReply("")
+      }
       setDetail(result)
       setClosing(false)
       setResolve(false)
@@ -573,6 +579,20 @@ export function AnalystConsole({
               <div ref={historyEnd} className="h-px" />
             </div>
             <footer className="shrink-0 border-t border-[#e8ebef] bg-white p-4">
+              {detail.status === "CLOSED" && (
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">Atendimento encerrado</p>
+                    <p className="text-xs text-slate-500">
+                      Inicie outra conversa com este utilizador.
+                    </p>
+                  </div>
+                  <Button disabled={busy} onClick={() => void act("start")}>
+                    <MessageSquare className="size-4" />
+                    Novo atendimento
+                  </Button>
+                </div>
+              )}
               {waiting && (
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
@@ -603,7 +623,7 @@ export function AnalystConsole({
                 </div>
               )}
               <form
-                className="flex items-end gap-3 "
+                className="flex items-end gap-3"
                 onSubmit={(e) => {
                   e.preventDefault()
                   void act("reply")
@@ -616,7 +636,9 @@ export function AnalystConsole({
                   placeholder={
                     owned
                       ? "Escreva sua resposta…"
-                      : "Assuma o atendimento para responder"
+                      : detail.status === "CLOSED"
+                        ? "Inicie um novo atendimento para responder"
+                        : "Assuma o atendimento para responder"
                   }
                   value={reply}
                   maxLength={4000}
@@ -634,7 +656,7 @@ export function AnalystConsole({
                   aria-label="Enviar resposta"
                   disabled={!owned || busy || !reply.trim()}
                 >
-                  <SendHorizonal  />
+                  <SendHorizonal />
                 </Button>
               </form>
             </footer>

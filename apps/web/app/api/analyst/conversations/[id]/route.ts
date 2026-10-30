@@ -7,7 +7,11 @@ export function GET(request: Request, context: Context) {
   )
 }
 export function POST(request: Request, context: Context) {
-  return analystResponse(request, async (id) =>
-    analysts().act(id, (await context.params).id, await request.json())
-  )
+  return analystResponse(request, async (id) => {
+    const input = await request.json()
+    const conversationId = (await context.params).id
+    return input?.action === "start"
+      ? analysts().start(id, conversationId, input)
+      : analysts().act(id, conversationId, input)
+  })
 }

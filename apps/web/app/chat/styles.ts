@@ -32,6 +32,8 @@ export const styles = {
   headerTitle: "font-medium text-foreground",
   online:
     "rounded-full bg-[#ecfaf4] px-2.5 py-1 text-xs whitespace-nowrap text-[#00804a] max-[700px]:text-[10px]",
+  offline:
+    "rounded-full bg-muted px-2.5 py-1 text-xs whitespace-nowrap text-muted-foreground max-[700px]:text-[10px]",
   waitingBadge:
     "rounded-full bg-[#fff6e5] px-2.5 py-1 text-xs whitespace-nowrap text-[#946300] max-[700px]:text-[10px]",
   scroll: "min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]",

@@ -59,6 +59,7 @@ export type ChatMessage = {
   decision: PublicDecision | null
   id: string
   author: string
+  authorUserId: string | null
   content: string
   createdAt: string
   metadata: {
@@ -79,6 +80,7 @@ export type ChatDraft = {
 }
 export type ChatSnapshot = {
   activity: ConversationActivity
+  assignedAnalystId: string | null
   id: string
   status: string
   revision: number

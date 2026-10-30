@@ -57,3 +57,11 @@ O painel direito segue a referência de atendimento assumido: resumo de abertos/
 Validação: TypeScript backend/web, build Webpack e regressão de atendimento passaram. O teste inclui duas sessões do mesmo funcionário, soma de não lidas, busca por chamado e filtros. No Chromium, confirmou-se uma única linha por funcionário, acesso ao histórico, detalhes/lista de chamados, presença, digitação, leitura, logout e layout móvel. O lint terminou sem erros, com avisos da configuração existente para JSX/tipos.
 
 O painel lateral foi refinado conforme a referência recortada: cabeçalho fixo de 64 px, cartão arredondado com estado e responsável alinhados, linhas compactas de pelo menos 64 px, indicadores de estado pequenos, divisórias discretas e botão inferior de 36 px. Textos longos adaptam-se sem sobrepor o horário.
+
+## Iniciar outro atendimento após encerrar
+
+Ao encerrar, o console exibe “Novo atendimento”. A ação cria outra conversa já atribuída ao analista e envia uma mensagem de convite ao funcionário. No chat, “Abrir atendimento” permite entrar nela sem recarregar a página. O funcionário também encontra “Iniciar nova conversa” junto ao compositor de um atendimento encerrado.
+
+O atendimento anterior permanece encerrado e os chamados resolvidos mantêm o estado. A operação valida o papel de analista, a revisão da conversa e a origem do pedido. Repetir o mesmo pedido devolve a mesma conversa. Tentativas simultâneas não duplicam o atendimento; quando já existe um atendimento deste analista, ele é reutilizado. Um atendimento humano de outro analista ou aguardando na fila impede uma criação paralela.
+
+Validação do reinício: passaram TypeScript backend/web, build Webpack e testes de serviço para permissões, repetição do pedido, concorrência, convite não lido e respostas na nova conversa. No Chromium, duas sessões confirmaram encerrar → novo atendimento → abrir convite → trocar mensagens, preservando uma entrada por utilizador. Também passou a criação de nova conversa pelo funcionário após encerrar.

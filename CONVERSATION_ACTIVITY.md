@@ -38,3 +38,5 @@ CHAT_CHECK_URL=http://localhost:3100 pnpm chat:check
 Passaram a verificação TypeScript do backend/web, os testes `activity:check`, a regressão HTTP/SSE do chat e a regressão do atendimento humano. No Chromium, duas sessões independentes confirmaram presença, contadores, digitação nos dois sentidos, leitura ao abrir, preservação de não lidas em segundo plano, logout e adaptação móvel.
 
 A versão de produção foi compilada e testada com `pnpm --filter web build --webpack`. O Turbopack apresentou reinícios contínuos no modo de desenvolvimento e erro de processo auxiliar neste ambiente; o Webpack permitiu concluir a validação. O lint explícito dos novos componentes terminou sem erros, com os avisos de JSX/tipos da configuração existente.
+
+No chat do funcionário, o estado do analista responsável aparece junto ao rótulo “Analista” nas suas mensagens. O indicador e o estado superior ficam verdes quando online e cinzentos quando offline; o estado de espera mantém o amarelo. As atualizações usam a presença real recebida por SSE, sem recarregar a página. Mensagens de outros analistas ou de atendimentos encerrados não recebem o indicador do responsável atual.

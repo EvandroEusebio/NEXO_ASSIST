@@ -98,6 +98,116 @@ export function createAnalystService(db: PrismaClient) {
   }
   return {
     detail,
+    async start(analystId: string, sourceId: string, input: unknown) {
+      const analyst = await authorize(analystId)
+      parse(z.uuid(), sourceId)
+      const data = parse(
+        z
+          .object({
+            action: z.literal("start"),
+            requestId: z.uuid(),
+            revision: z.number().int().nonnegative(),
+          })
+          .strict(),
+        input
+      )
+      const targetId = await db.$transaction(
+        async (tx) => {
+          const locked = await tx.conversation.updateMany({
+            where: { id: sourceId },
+            data: { revision: { increment: 1 } },
+          })
+          if (!locked.count)
+            throw new AnalystError(404, "Conversa não encontrada.")
+          const replay = await tx.message.findUnique({
+            where: { requestId: data.requestId },
+          })
+          if (replay) {
+            const metadata = replay.metadata as {
+              action?: string
+              conversationId?: string
+            } | null
+            if (
+              replay.conversationId !== sourceId ||
+              replay.authorUserId !== analystId ||
+              metadata?.action !== "start" ||
+              !metadata.conversationId
+            )
+              throw new AnalystError(409, "Pedido já utilizado.")
+            return metadata.conversationId
+          }
+          const source = await tx.conversation.findUniqueOrThrow({
+            where: { id: sourceId },
+          })
+          if (source.revision !== data.revision + 1)
+            throw new AnalystError(
+              409,
+              "A conversa mudou. Atualize antes de continuar."
+            )
+          if (source.status !== "CLOSED")
+            throw new AnalystError(
+              409,
+              "Inicie um novo atendimento a partir de uma conversa encerrada."
+            )
+          // Serialize starts for the same contact, including starts from different old threads.
+          await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${source.employeeId}::uuid FOR UPDATE`
+          const active = await tx.conversation.findFirst({
+            where: {
+              employeeId: source.employeeId,
+              status: { in: ["ANALYST_ACTIVE", "WAITING_ANALYST"] },
+            },
+            orderBy: { createdAt: "desc" },
+          })
+          if (
+            active &&
+            (active.status !== "ANALYST_ACTIVE" ||
+              active.assignedAnalystId !== analystId)
+          )
+            throw new AnalystError(
+              409,
+              "Este utilizador já tem um atendimento humano ativo. Abra-o na lista de conversas."
+            )
+          const target =
+            active ??
+            (await tx.conversation.create({
+              data: {
+                employeeId: source.employeeId,
+                status: "ANALYST_ACTIVE",
+                assignedAnalystId: analystId,
+                messages: {
+                  create: {
+                    author: "ANALYST",
+                    authorUserId: analystId,
+                    content: `Olá! Sou ${analyst.name} e iniciei um novo atendimento. Pode escrever por aqui.`,
+                    metadata: {
+                      kind: "analyst-action",
+                      action: "start",
+                      previousConversationId: sourceId,
+                    },
+                  },
+                },
+              },
+            }))
+          await tx.message.create({
+            data: {
+              conversationId: sourceId,
+              author: "SYSTEM",
+              authorUserId: analystId,
+              content: `${analyst.name} iniciou um novo atendimento. Esta conversa permanece encerrada.`,
+              requestId: data.requestId,
+              metadata: {
+                kind: "analyst-action",
+                action: "start",
+                conversationId: target.id,
+              },
+            },
+          })
+          return target.id
+        },
+        { timeout: 15000 }
+      )
+      return detail(analystId, targetId)
+    },
     async list(analystId: string) {
       await authorize(analystId)
       // Limit contacts, not sessions: one frequent user must not crowd out the queue.
